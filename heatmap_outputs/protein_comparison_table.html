@@ -1,0 +1,65 @@
+
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <title>Protein ΔΔG Comparison</title>
+        <style>
+            body { font-family: Arial, sans-serif; background-color: #E0E0E0; color: #333333; margin: 20px; }
+            table { width: 80%; margin: auto; border-collapse: collapse; }
+            th, td { border: 1px solid #333; padding: 12px; text-align: left; }
+            th { background-color: #ADD8E6; color: #000000; cursor: pointer; }
+            tr:nth-child(even) { background-color: #F0F0F0; }
+            tr:hover { background-color: #D3D3D3; }
+            a { text-decoration: none; }
+            a:hover { text-decoration: underline; }
+        </style>
+    </head>
+    <body>
+        <h2 style="text-align: center;">Protein ΔΔG Comparison</h2>
+        <table id="myTable">
+            <thead><tr><th onclick="sortTable(0)">PDB ID</th>
+<th onclick="sortTable(1)">Mean ΔΔG (FoldX)</th>
+<th onclick="sortTable(2)">SD ΔΔG (FoldX)</th>
+<th onclick="sortTable(3)">Mean ΔΔG (Experiment)</th>
+<th onclick="sortTable(4)">SD ΔΔG (Experiment)</th>
+</tr></thead>
+            <tbody><tr><td><a href="heatmap_combined_2K1B.html" target="_blank" style="color: #00008B;">2K1B</a></td><td>1.04</td><td>1.71</td><td>-0.72</td><td>0.85</td></tr>
+<tr><td><a href="heatmap_combined_2LO1.html" target="_blank" style="color: #00008B;">2LO1</a></td><td>1.04</td><td>1.96</td><td>-1.03</td><td>1.28</td></tr>
+<tr><td><a href="heatmap_combined_2MC5.html" target="_blank" style="color: #00008B;">2MC5</a></td><td>1.54</td><td>4.41</td><td>-0.71</td><td>0.89</td></tr>
+<tr><td><a href="heatmap_combined_2LQK.html" target="_blank" style="color: #00008B;">2LQK</a></td><td>1.12</td><td>2.08</td><td>-0.72</td><td>1.01</td></tr>
+</tbody>
+        </table>
+        <script>
+            function sortTable(column) {
+                var table, rows, switching, i, x, y, shouldSwitch;
+                table = document.getElementById("myTable");
+                switching = true;
+                while (switching) {
+                    switching = false;
+                    rows = table.rows;
+                    for (i = 1; i < (rows.length - 1); i++) {
+                        shouldSwitch = false;
+                        x = rows[i].getElementsByTagName("TD")[column];
+                        y = rows[i + 1].getElementsByTagName("TD")[column];
+                        if (!isNaN(parseFloat(x.innerHTML)) && !isNaN(parseFloat(y.innerHTML))) {
+                            if (parseFloat(x.innerHTML) > parseFloat(y.innerHTML)) {
+                                shouldSwitch = true;
+                                break;
+                            }
+                        } else {
+                            if (x.innerHTML.toLowerCase() > y.innerHTML.toLowerCase()) {
+                                shouldSwitch = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (shouldSwitch) {
+                        rows[i].parentNode.insertBefore(rows[i + 1], rows[i]);
+                        switching = true;
+                    }
+                }
+            }
+        </script>
+    </body>
+    </html>
+    
