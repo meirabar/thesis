@@ -17,7 +17,9 @@
 # ============================================================================
 
 set -euo pipefail
-source "$(dirname "${BASH_SOURCE[0]}")/config.sh"
+if [[ -z "${REPO_DIR:-}" ]]; then
+    source "$(dirname "${BASH_SOURCE[0]}")/config.sh"
+fi
 
 source "${VENV_DIR}/bin/activate"
 

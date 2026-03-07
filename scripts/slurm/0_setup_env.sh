@@ -16,7 +16,7 @@
 
 set -euo pipefail
 
-# Load shared paths
+# Load shared paths (0_setup_env.sh is always run interactively, never via sbatch)
 source "$(dirname "${BASH_SOURCE[0]}")/config.sh"
 
 echo "============================================"

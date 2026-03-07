@@ -7,29 +7,29 @@
 #
 # To use on a different machine or as a collaborator:
 #   1. Clone the repo
-#   2. Edit the paths below
+#   2. Edit the 3 paths below
 #   3. Run 0_setup_env.sh to create the venv
 #   4. Run submit_pipeline.sh
 # ============================================================================
 
 # --- Code repositories ---
-REPO_DIR="/sci/labs/orzuk/orzuk/github/meira_thesis"
-THERMOMPNN_DIR="/sci/labs/orzuk/orzuk/github/ThermoMPNN"
+export REPO_DIR="/sci/labs/orzuk/orzuk/github/meira_thesis"
+export THERMOMPNN_DIR="/sci/labs/orzuk/orzuk/github/ThermoMPNN"
 
 # --- Project directory (data, results, logs — outside the git repo) ---
-PROJECT_DIR="/sci/labs/orzuk/orzuk/projects/ProteinStability"
+export PROJECT_DIR="/sci/labs/orzuk/orzuk/projects/ProteinStability"
 
 # --- Derived paths (no need to edit unless you want a custom layout) ---
-VENV_DIR="${PROJECT_DIR}/envs/robustness"
-ATLAS_DIR="${PROJECT_DIR}/data/atlas"
-ROBUSTNESS_DIR="${PROJECT_DIR}/data/atlas_robustness"
-ANALYSIS_DIR="${PROJECT_DIR}/data/atlas_analysis"
-LOG_DIR="${PROJECT_DIR}/logs"
+export VENV_DIR="${PROJECT_DIR}/envs/robustness"
+export ATLAS_DIR="${PROJECT_DIR}/data/atlas"
+export ROBUSTNESS_DIR="${PROJECT_DIR}/data/atlas_robustness"
+export ANALYSIS_DIR="${PROJECT_DIR}/data/atlas_analysis"
+export LOG_DIR="${PROJECT_DIR}/logs"
 
 # --- SLURM settings ---
-GPU_PARTITION="gpu"          # partition with GPUs (sinfo to check)
-CPU_PARTITION="long"         # partition for CPU-only / long jobs
-CHUNK_SIZE=50                # proteins per array task
+export GPU_PARTITION="catfish"
+export CPU_PARTITION="glacier"
+export CHUNK_SIZE=50
 
 # --- Create directories ---
 mkdir -p "${LOG_DIR}"
