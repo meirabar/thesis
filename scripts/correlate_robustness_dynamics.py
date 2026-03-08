@@ -208,10 +208,16 @@ class PerProteinResult:
     seq_length: int
     n_residues_used: int  # after filtering NaN
 
-    # Robustness vs RMSF
+    # Robustness vs RMSF (primary measure: mean |DDG|)
     rho_robustness_rmsf: float = np.nan
     pval_robustness_rmsf: float = np.nan
     r2_robustness_rmsf: float = np.nan
+
+    # Alternative robustness measures vs RMSF
+    rho_frac_destab_rmsf: float = np.nan     # fraction of destabilizing mutations (ddG > 1)
+    rho_frac_neutral_rmsf: float = np.nan    # fraction of neutral mutations (|ddG| < 0.5)
+    rho_std_ddg_rmsf: float = np.nan         # std of ddG (landscape ruggedness)
+    rho_max_ddg_rmsf: float = np.nan         # worst-case mutation effect
 
     # pLDDT vs RMSF (baseline)
     rho_plddt_rmsf: float = np.nan
@@ -234,6 +240,10 @@ class PerProteinResult:
     beta_robustness: float = np.nan      # regression coefficient
     beta_plddt: float = np.nan
 
+    # Multiple regression with best robustness combo: RMSF ~ mean_abs_ddg + frac_destab + pLDDT
+    r2_joint_multi_rob: float = np.nan
+    delta_r2_multi_rob_over_plddt: float = np.nan
+
     # Global robustness metrics
     global_mean_abs_ddg: float = np.nan
     global_mean_ddg: float = np.nan
@@ -252,8 +262,12 @@ def correlate_single_protein(
 ) -> Optional[PerProteinResult]:
     """Compute all correlations for a single protein."""
 
-    # Merge on position
-    merged = robustness_df[["position", "mean_abs_ddg", "mean_ddg"]].copy()
+    # Merge on position — include all available robustness measures
+    rob_cols = ["position", "mean_abs_ddg", "mean_ddg"]
+    for extra in ["frac_destabilizing", "frac_neutral", "std_ddg", "max_ddg"]:
+        if extra in robustness_df.columns:
+            rob_cols.append(extra)
+    merged = robustness_df[rob_cols].copy()
     merged = merged.merge(rmsf_df[["position", "rmsf_avg"]], on="position", how="inner")
 
     if plddt_df is not None:
@@ -278,13 +292,24 @@ def correlate_single_protein(
         scorer=scorer,
     )
 
-    # --- Robustness vs RMSF ---
+    # --- Robustness vs RMSF (primary: mean |DDG|) ---
     rho, pval = scipy_stats.spearmanr(core["mean_abs_ddg"], core["rmsf_avg"])
     result.rho_robustness_rmsf = rho
     result.pval_robustness_rmsf = pval
     # Pearson R^2
     r, _ = scipy_stats.pearsonr(core["mean_abs_ddg"], core["rmsf_avg"])
     result.r2_robustness_rmsf = r ** 2
+
+    # --- Alternative robustness measures vs RMSF ---
+    for col, attr in [("frac_destabilizing", "rho_frac_destab_rmsf"),
+                       ("frac_neutral", "rho_frac_neutral_rmsf"),
+                       ("std_ddg", "rho_std_ddg_rmsf"),
+                       ("max_ddg", "rho_max_ddg_rmsf")]:
+        if col in core.columns:
+            valid_alt = core.dropna(subset=[col])
+            if len(valid_alt) >= 10:
+                rho_alt, _ = scipy_stats.spearmanr(valid_alt[col], valid_alt["rmsf_avg"])
+                setattr(result, attr, rho_alt)
 
     # --- pLDDT vs RMSF ---
     plddt_valid = core.dropna(subset=["plddt"])
@@ -333,6 +358,16 @@ def correlate_single_protein(
         result.delta_r2_over_plddt = r2_joint - r2_plddt_only
         result.beta_robustness = float(reg_joint.coef_[0])
         result.beta_plddt = float(reg_joint.coef_[1])
+
+        # Multi-robustness regression: RMSF ~ mean_abs_ddg + frac_destabilizing + pLDDT
+        if "frac_destabilizing" in joint_valid.columns:
+            multi_valid = joint_valid.dropna(subset=["frac_destabilizing"])
+            if len(multi_valid) >= 10:
+                X_multi = multi_valid[["mean_abs_ddg", "frac_destabilizing", "plddt"]].values
+                y_multi = multi_valid["rmsf_avg"].values
+                r2_multi = LinearRegression().fit(X_multi, y_multi).score(X_multi, y_multi)
+                result.r2_joint_multi_rob = r2_multi
+                result.delta_r2_multi_rob_over_plddt = r2_multi - r2_plddt_only
 
     # --- Global metrics ---
     if global_metrics:
@@ -765,7 +800,11 @@ def run_analysis_for_scorer(
         per_protein_results.append(result)
 
         # Build merged DataFrame for pooled analysis
-        merged = rob_df[["position", "mean_abs_ddg", "mean_ddg"]].copy()
+        rob_merge_cols = ["position", "mean_abs_ddg", "mean_ddg"]
+        for extra in ["frac_destabilizing", "frac_neutral", "std_ddg", "max_ddg"]:
+            if extra in rob_df.columns:
+                rob_merge_cols.append(extra)
+        merged = rob_df[rob_merge_cols].copy()
         merged = merged.merge(rmsf_df[["position", "rmsf_avg"]], on="position", how="inner")
         if plddt_df is not None:
             merged = merged.merge(plddt_df[["position", "plddt"]], on="position", how="left")
@@ -832,6 +871,24 @@ def run_analysis_for_scorer(
           f"{pooled.median_rho_plddt_rmsf:.3f}")
     print(f"Frac where |rho_robustness| > |rho_pLDDT|:   "
           f"{pooled.frac_robustness_beats_plddt:.3f}")
+
+    # Alternative robustness measures summary
+    alt_measures = {
+        "frac_destab": "rho_frac_destab_rmsf",
+        "frac_neutral": "rho_frac_neutral_rmsf",
+        "std_ddg": "rho_std_ddg_rmsf",
+        "max_ddg": "rho_max_ddg_rmsf",
+    }
+    alt_medians = {}
+    for label, attr in alt_measures.items():
+        vals = [getattr(r, attr) for r in per_protein_results
+                if not np.isnan(getattr(r, attr))]
+        if vals:
+            alt_medians[label] = np.median(vals)
+    if alt_medians:
+        print(f"\nAlternative robustness measures (median rho vs RMSF):")
+        for label, med in sorted(alt_medians.items(), key=lambda x: -abs(x[1])):
+            print(f"  {label:20s}: {med:.3f}")
     print(f"")
     print(f"Pooled rho (robustness vs RMSF):  {pooled.pooled_rho_robustness_rmsf:.3f} "
           f"(p={pooled.pooled_pval_robustness_rmsf:.2e})")
