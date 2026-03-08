@@ -3,7 +3,7 @@
 #SBATCH --time=08:00:00
 #SBATCH --mem=16G
 #SBATCH --cpus-per-task=2
-#SBATCH --gpus=1
+#SBATCH --gres=gpu:l4:1
 #
 # Compute ThermoMPNN mutational robustness for ATLAS proteins.
 # Designed as a SLURM array job: each task processes a chunk of proteins.

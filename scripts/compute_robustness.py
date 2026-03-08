@@ -351,10 +351,11 @@ class ThermoMPNNScorer(DDGScorer):
                 "thermompnn_dir": str(thermompnn_dir),
             },
         }
-        # Check for local.yaml override (ThermoMPNN uses this for paths)
+        # Load local.yaml from ThermoMPNN repo (has model architecture defaults)
+        # but our config takes priority (overrides hardcoded paths from original lab)
         local_yaml = thermompnn_dir / "local.yaml"
         if local_yaml.exists():
-            cfg = OmegaConf.merge(config, OmegaConf.load(str(local_yaml)))
+            cfg = OmegaConf.merge(OmegaConf.load(str(local_yaml)), config)
         else:
             cfg = OmegaConf.create(config)
 

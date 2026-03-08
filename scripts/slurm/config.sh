@@ -30,6 +30,9 @@ export LOG_DIR="${PROJECT_DIR}/logs"
 export GPU_PARTITION="catfish"
 export CPU_PARTITION="glacier"
 export CHUNK_SIZE=50
+# GPU request syntax for this cluster: --gres=gpu:l4:1 (catfish L4 24GB)
+# Alternatives: gpu:l40s:1 (salmon 48GB), gpu:h200:1 (goldfish 141GB)
+export GPU_GRES="gpu:l4:1"
 
 # --- Create directories ---
 mkdir -p "${LOG_DIR}"
