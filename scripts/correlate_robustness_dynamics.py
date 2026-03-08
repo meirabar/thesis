@@ -480,26 +480,27 @@ def run_pooled_analysis(
         r, _ = scipy_stats.pearsonr(valid["mean_abs_ddg_z"], valid["rmsf_avg_z"])
         result.pooled_r2_robustness_rmsf = r ** 2
 
-    valid_plddt = pooled.dropna(subset=["plddt_z", "rmsf_avg_z"])
-    if len(valid_plddt) >= 20:
-        rho, pval = scipy_stats.spearmanr(valid_plddt["plddt_z"], valid_plddt["rmsf_avg_z"])
-        result.pooled_rho_plddt_rmsf = rho
-        result.pooled_pval_plddt_rmsf = pval
-        r, _ = scipy_stats.pearsonr(valid_plddt["plddt_z"], valid_plddt["rmsf_avg_z"])
-        result.pooled_r2_plddt_rmsf = r ** 2
+    if "plddt_z" in pooled.columns:
+        valid_plddt = pooled.dropna(subset=["plddt_z", "rmsf_avg_z"])
+        if len(valid_plddt) >= 20:
+            rho, pval = scipy_stats.spearmanr(valid_plddt["plddt_z"], valid_plddt["rmsf_avg_z"])
+            result.pooled_rho_plddt_rmsf = rho
+            result.pooled_pval_plddt_rmsf = pval
+            r, _ = scipy_stats.pearsonr(valid_plddt["plddt_z"], valid_plddt["rmsf_avg_z"])
+            result.pooled_r2_plddt_rmsf = r ** 2
 
-    # Pooled joint regression
-    joint_valid = pooled.dropna(subset=["mean_abs_ddg_z", "plddt_z", "rmsf_avg_z"])
-    if len(joint_valid) >= 20:
-        from sklearn.linear_model import LinearRegression
-        y = joint_valid["rmsf_avg_z"].values
-        X_plddt = joint_valid[["plddt_z"]].values
-        X_joint = joint_valid[["mean_abs_ddg_z", "plddt_z"]].values
+        # Pooled joint regression
+        joint_valid = pooled.dropna(subset=["mean_abs_ddg_z", "plddt_z", "rmsf_avg_z"])
+        if len(joint_valid) >= 20:
+            from sklearn.linear_model import LinearRegression
+            y = joint_valid["rmsf_avg_z"].values
+            X_plddt = joint_valid[["plddt_z"]].values
+            X_joint = joint_valid[["mean_abs_ddg_z", "plddt_z"]].values
 
-        r2_p = LinearRegression().fit(X_plddt, y).score(X_plddt, y)
-        r2_j = LinearRegression().fit(X_joint, y).score(X_joint, y)
-        result.pooled_r2_joint = r2_j
-        result.pooled_delta_r2 = r2_j - r2_p
+            r2_p = LinearRegression().fit(X_plddt, y).score(X_plddt, y)
+            r2_j = LinearRegression().fit(X_joint, y).score(X_joint, y)
+            result.pooled_r2_joint = r2_j
+            result.pooled_delta_r2 = r2_j - r2_p
 
     return result
 
@@ -549,10 +550,11 @@ def run_stratified_analysis(
             entry["rho_robustness_rmsf"] = rho
             entry["pval_robustness_rmsf"] = pval
 
-        valid_p = group.dropna(subset=["plddt_z", "rmsf_avg_z"])
-        if len(valid_p) >= 20:
-            rho, _ = scipy_stats.spearmanr(valid_p["plddt_z"], valid_p["rmsf_avg_z"])
-            entry["rho_plddt_rmsf"] = rho
+        if "plddt_z" in group.columns:
+            valid_p = group.dropna(subset=["plddt_z", "rmsf_avg_z"])
+            if len(valid_p) >= 20:
+                rho, _ = scipy_stats.spearmanr(valid_p["plddt_z"], valid_p["rmsf_avg_z"])
+                entry["rho_plddt_rmsf"] = rho
 
         results[str(cat)] = entry
 
