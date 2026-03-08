@@ -39,25 +39,27 @@ KEEP_SUFFIXES = ["_RMSF.tsv", "_pLDDT.tsv", "_Bfactor.tsv", "_Neq.tsv", ".pdb",
                  "_corresp.tsv"]
 
 
-def download_file(url, dest_path, retries=3, delay=2):
-    """Download a file with retries and exponential backoff."""
+def download_file(url, dest_path, retries=3, delay=2, timeout=60):
+    """Download a file with retries, exponential backoff, and socket timeout."""
     for attempt in range(retries):
         try:
-            urllib.request.urlretrieve(url, dest_path)
+            resp = urllib.request.urlopen(url, timeout=timeout)
+            with open(dest_path, 'wb') as f:
+                f.write(resp.read())
             return True
         except urllib.error.HTTPError as e:
             if e.code == 429:  # rate limited
                 wait = delay * (2 ** attempt)
-                print(f"  Rate limited, waiting {wait}s...")
+                print(f"  Rate limited, waiting {wait}s...", flush=True)
                 time.sleep(wait)
             elif e.code == 404:
-                print(f"  404 Not Found: {url}")
+                print(f"  404 Not Found: {url}", flush=True)
                 return False
             else:
-                print(f"  HTTP {e.code} for {url}, attempt {attempt+1}/{retries}")
+                print(f"  HTTP {e.code} for {url}, attempt {attempt+1}/{retries}", flush=True)
                 time.sleep(delay)
         except Exception as e:
-            print(f"  Error: {e}, attempt {attempt+1}/{retries}")
+            print(f"  Error: {e}, attempt {attempt+1}/{retries}", flush=True)
             time.sleep(delay)
     return False
 
@@ -200,7 +202,7 @@ def main():
 
         if args.metadata_only:
             status = download_metadata_json(pdb_chain, output_dir)
-            print(f"{progress} {pdb_chain}: metadata {status}")
+            print(f"{progress} {pdb_chain}: metadata {status}", flush=True)
         else:
             # Download both metadata and analysis
             meta_status = download_metadata_json(pdb_chain, output_dir)
@@ -208,7 +210,7 @@ def main():
                 pdb_chain, output_dir, keep_zip=args.keep_zip)
             status = analysis_status
             print(f"{progress} {pdb_chain}: analysis={analysis_status} "
-                  f"metadata={meta_status}")
+                  f"metadata={meta_status}", flush=True)
 
         counts[status] = counts.get(status, 0) + 1
 
