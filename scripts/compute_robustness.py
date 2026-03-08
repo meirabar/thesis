@@ -405,6 +405,24 @@ class ThermoMPNNScorer(DDGScorer):
         # Fallback: if parsing returned empty, try without specifying chain
         if not pdb_data or not pdb_data[0].get("seq", ""):
             pdb_data = self._alt_parse_PDB(pdb_path)
+        # Fallback 2: ATLAS/GROMACS PDBs have no chain ID (column 22 is blank).
+        # Add chain "A" to all ATOM/HETATM records and retry.
+        if not pdb_data or not pdb_data[0].get("seq", ""):
+            import tempfile
+            with open(pdb_path) as f:
+                lines = f.readlines()
+            fixed_lines = []
+            for line in lines:
+                if (line.startswith("ATOM") or line.startswith("HETATM")) and len(line) > 21:
+                    # PDB column 22 (0-indexed: 21) is the chain ID
+                    if line[21] == " ":
+                        line = line[:21] + "A" + line[22:]
+                fixed_lines.append(line)
+            tmp = tempfile.NamedTemporaryFile(suffix=".pdb", mode="w", delete=False)
+            tmp.writelines(fixed_lines)
+            tmp.close()
+            pdb_data = self._alt_parse_PDB(tmp.name, input_chain_list="A")
+            os.unlink(tmp.name)
 
         # Verify sequence matches
         parsed_seq = pdb_data[0].get("seq", "")
