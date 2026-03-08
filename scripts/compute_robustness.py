@@ -103,8 +103,8 @@ class DDGScorer(ABC):
         """
         pass
 
-    def compute_ddg_matrix(self, seq: str, pdb_path: Optional[str] = None
-                           ) -> np.ndarray:
+    def compute_ddg_matrix(self, seq: str, pdb_path: Optional[str] = None,
+                           chain_id: Optional[str] = None) -> np.ndarray:
         """Compute L x 19 DDG matrix by exhaustive single-point mutations.
 
         Returns:
@@ -198,8 +198,8 @@ class ESM1vScorer(DDGScorer):
                 -1, target.unsqueeze(-1)).squeeze(-1)
             return nll.sum().item()
 
-    def compute_ddg_matrix(self, seq: str, pdb_path: Optional[str] = None
-                           ) -> np.ndarray:
+    def compute_ddg_matrix(self, seq: str, pdb_path: Optional[str] = None,
+                           chain_id: Optional[str] = None) -> np.ndarray:
         """Compute DDG matrix using masked marginals (L forward passes).
 
         For each position i, mask it and get p(b | seq_\\i) for all b.
@@ -379,8 +379,8 @@ class ThermoMPNNScorer(DDGScorer):
         Returns 0.0 for compatibility with the base class interface."""
         return 0.0
 
-    def compute_ddg_matrix(self, seq: str, pdb_path: Optional[str] = None
-                           ) -> np.ndarray:
+    def compute_ddg_matrix(self, seq: str, pdb_path: Optional[str] = None,
+                           chain_id: Optional[str] = None) -> np.ndarray:
         """Compute L x 19 DDG matrix using ThermoMPNN.
 
         ThermoMPNN predicts DDG directly for each (position, wt->mut) pair.
@@ -398,8 +398,13 @@ class ThermoMPNNScorer(DDGScorer):
         ddg_full = np.full((L, N_AA), np.nan, dtype=np.float32)
 
         # Parse PDB using ThermoMPNN's parser
+        # Use per-protein chain_id if provided, otherwise fall back to default
+        parse_chain = chain_id or self._chain_id
         pdb_data = self._alt_parse_PDB(pdb_path,
-                                        input_chain_list=self._chain_id)
+                                        input_chain_list=parse_chain)
+        # Fallback: if parsing returned empty, try without specifying chain
+        if not pdb_data or not pdb_data[0].get("seq", ""):
+            pdb_data = self._alt_parse_PDB(pdb_path)
 
         # Verify sequence matches
         parsed_seq = pdb_data[0].get("seq", "")
@@ -696,7 +701,8 @@ def _json_default(obj):
 
 def process_single_protein(protein_id: str, seq: str, pdb_path: Optional[str],
                            scorer: DDGScorer, output_dir: str,
-                           skip_existing: bool = True) -> bool:
+                           skip_existing: bool = True,
+                           chain_id: Optional[str] = None) -> bool:
     """Process one protein: compute DDG matrix, robustness metrics, save."""
     out_dir = Path(output_dir) / scorer.name
     json_path = out_dir / f"{protein_id}_robustness.json"
@@ -722,7 +728,7 @@ def process_single_protein(protein_id: str, seq: str, pdb_path: Optional[str],
 
     # Compute DDG matrix
     try:
-        ddg_matrix = scorer.compute_ddg_matrix(seq, pdb_path)
+        ddg_matrix = scorer.compute_ddg_matrix(seq, pdb_path, chain_id=chain_id)
     except Exception as e:
         print(f"  FAIL {protein_id}: {e}")
         return False
@@ -813,19 +819,19 @@ def main():
     scorer.load_model(device=args.device)
 
     # Determine input mode
-    proteins_to_process = []  # list of (protein_id, seq, pdb_path)
+    proteins_to_process = []  # list of (protein_id, seq, pdb_path, chain_id)
 
     if args.sequence is not None:
         # Sequence mode (no PDB)
         pid = args.protein_id or "input_sequence"
-        proteins_to_process.append((pid, args.sequence, args.pdb_file))
+        proteins_to_process.append((pid, args.sequence, args.pdb_file, args.chain_id))
 
     elif args.pdb_file is not None:
         # Single PDB mode
         pdb_path = args.pdb_file
         pid = args.protein_id or Path(pdb_path).stem
         seq = extract_sequence_from_pdb(pdb_path, args.chain_id)
-        proteins_to_process.append((pid, seq, pdb_path))
+        proteins_to_process.append((pid, seq, pdb_path, args.chain_id))
 
     elif args.pdb_list is not None:
         # List of PDB files
@@ -835,7 +841,7 @@ def main():
             pid = Path(pdb_path).stem
             try:
                 seq = extract_sequence_from_pdb(pdb_path, args.chain_id)
-                proteins_to_process.append((pid, seq, pdb_path))
+                proteins_to_process.append((pid, seq, pdb_path, args.chain_id))
             except Exception as e:
                 print(f"SKIP {pdb_path}: {e}")
 
@@ -857,7 +863,7 @@ def main():
                 parts = p["protein_id"].rsplit("_", 1)
                 chain_id = parts[1] if len(parts) == 2 else "A"
                 seq = extract_sequence_from_pdb(p["pdb_path"], chain_id)
-                proteins_to_process.append((p["protein_id"], seq, p["pdb_path"]))
+                proteins_to_process.append((p["protein_id"], seq, p["pdb_path"], chain_id))
             except Exception as e:
                 print(f"SKIP {p['protein_id']}: {e}")
 
@@ -873,7 +879,7 @@ def main():
 
     n_ok, n_skip, n_fail = 0, 0, 0
     t_start = _time.time()
-    for idx, (pid, seq, pdb_path) in enumerate(proteins_to_process):
+    for idx, (pid, seq, pdb_path, prot_chain) in enumerate(proteins_to_process):
         # Check if already done
         out_json = (Path(args.output_dir) / scorer.name /
                     f"{pid}_robustness.json")
@@ -890,7 +896,7 @@ def main():
               end=" ", flush=True)
         success = process_single_protein(
             pid, seq, pdb_path, scorer, args.output_dir,
-            skip_existing=args.skip_existing
+            skip_existing=args.skip_existing, chain_id=prot_chain
         )
         elapsed = _time.time() - t0
         if success:
