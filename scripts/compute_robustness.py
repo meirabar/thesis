@@ -579,13 +579,26 @@ def _autocorr(x: np.ndarray, lag: int = 1) -> float:
 # ==========================================================================
 
 def extract_sequence_from_pdb(pdb_path: str, chain_id: str = "A") -> str:
-    """Extract amino acid sequence from a PDB file."""
+    """Extract amino acid sequence from a PDB file.
+
+    If the requested chain_id is not found, falls back to the first
+    available chain (ATLAS minimized PDBs sometimes relabel chains).
+    """
     from Bio.PDB import PDBParser
     from Bio.PDB.Polypeptide import protein_letters_3to1
 
     parser = PDBParser(QUIET=True)
     structure = parser.get_structure("protein", pdb_path)
-    chain = structure[0][chain_id]
+    model = structure[0]
+
+    # Try requested chain first, then fall back to first available chain
+    if chain_id in model:
+        chain = model[chain_id]
+    else:
+        available = [c.id for c in model]
+        if not available:
+            raise ValueError(f"No chains found in {pdb_path}")
+        chain = model[available[0]]
 
     seq = []
     for residue in chain:
@@ -838,7 +851,11 @@ def main():
 
         for p in atlas_proteins:
             try:
-                seq = extract_sequence_from_pdb(p["pdb_path"])
+                # ATLAS protein IDs are "{pdb}_{chain}" e.g. "2fb5_B"
+                # Extract the chain ID from the protein name
+                parts = p["protein_id"].rsplit("_", 1)
+                chain_id = parts[1] if len(parts) == 2 else "A"
+                seq = extract_sequence_from_pdb(p["pdb_path"], chain_id)
                 proteins_to_process.append((p["protein_id"], seq, p["pdb_path"]))
             except Exception as e:
                 print(f"SKIP {p['protein_id']}: {e}")
