@@ -197,6 +197,31 @@ def compute_burial(pdb_path: str) -> Optional[List[float]]:
         return None
 
 
+def compute_sasa_from_pdb(pdb_path: str) -> Optional[pd.DataFrame]:
+    """Compute per-residue SASA from a PDB file using mdtraj Shrake-Rupley.
+
+    This is independent of DSSP (works even with --no_dssp) and provides
+    a uniform burial baseline for all protein types (natural and designed).
+
+    Returns DataFrame with columns: position, sasa (in nm^2).
+    """
+    try:
+        import mdtraj
+        traj = mdtraj.load(pdb_path)
+        # Compute per-atom SASA, then sum by residue
+        sasa_per_atom = mdtraj.shrake_rupley(traj, mode='atom')  # shape (1, n_atoms)
+        sasa_per_residue = np.zeros(traj.topology.n_residues)
+        for atom in traj.topology.atoms:
+            sasa_per_residue[atom.residue.index] += sasa_per_atom[0, atom.index]
+        result = pd.DataFrame({
+            "position": range(1, len(sasa_per_residue) + 1),
+            "sasa": sasa_per_residue,
+        })
+        return result
+    except Exception:
+        return None
+
+
 # ==========================================================================
 # CORRELATION ANALYSIS
 # ==========================================================================
@@ -228,17 +253,33 @@ class PerProteinResult:
     rho_bfactor_rmsf: float = np.nan
     pval_bfactor_rmsf: float = np.nan
 
+    # SASA vs RMSF (burial baseline)
+    rho_sasa_rmsf: float = np.nan
+    pval_sasa_rmsf: float = np.nan
+    r2_sasa_rmsf: float = np.nan
+
     # Robustness vs pLDDT (are they correlated?)
     rho_robustness_plddt: float = np.nan
 
     # Robustness vs B-factor
     rho_robustness_bfactor: float = np.nan
 
+    # Robustness vs SASA (are they correlated?)
+    rho_robustness_sasa: float = np.nan
+
+    # Partial correlation: robustness vs RMSF, controlling for SASA
+    rho_robustness_rmsf_partial_sasa: float = np.nan
+    pval_robustness_rmsf_partial_sasa: float = np.nan
+
     # Multiple regression: RMSF ~ robustness + pLDDT
     r2_joint: float = np.nan
     delta_r2_over_plddt: float = np.nan  # r2_joint - r2_plddt
     beta_robustness: float = np.nan      # regression coefficient
     beta_plddt: float = np.nan
+
+    # Multiple regression: RMSF ~ robustness + SASA
+    r2_joint_sasa: float = np.nan
+    delta_r2_over_sasa: float = np.nan  # r2_joint_sasa - r2_sasa
 
     # Multiple regression with best robustness combo: RMSF ~ mean_abs_ddg + frac_destab + pLDDT
     r2_joint_multi_rob: float = np.nan
@@ -259,6 +300,7 @@ def correlate_single_protein(
     bfactor_df: Optional[pd.DataFrame],
     global_metrics: Optional[Dict],
     scorer: str,
+    sasa_df: Optional[pd.DataFrame] = None,
 ) -> Optional[PerProteinResult]:
     """Compute all correlations for a single protein."""
 
@@ -279,6 +321,11 @@ def correlate_single_protein(
         merged = merged.merge(bfactor_df[["position", "bfactor"]], on="position", how="left")
     else:
         merged["bfactor"] = np.nan
+
+    if sasa_df is not None:
+        merged = merged.merge(sasa_df[["position", "sasa"]], on="position", how="left")
+    else:
+        merged["sasa"] = np.nan
 
     # Drop rows with NaN in core columns
     core = merged.dropna(subset=["mean_abs_ddg", "rmsf_avg"])
@@ -336,6 +383,47 @@ def correlate_single_protein(
     if len(bfac_valid) >= 10:
         rho, _ = scipy_stats.spearmanr(bfac_valid["mean_abs_ddg"], bfac_valid["bfactor"])
         result.rho_robustness_bfactor = rho
+
+    # --- SASA vs RMSF (burial baseline) ---
+    sasa_valid = core.dropna(subset=["sasa"])
+    if len(sasa_valid) >= 10:
+        rho, pval = scipy_stats.spearmanr(sasa_valid["sasa"], sasa_valid["rmsf_avg"])
+        result.rho_sasa_rmsf = rho
+        result.pval_sasa_rmsf = pval
+        r, _ = scipy_stats.pearsonr(sasa_valid["sasa"], sasa_valid["rmsf_avg"])
+        result.r2_sasa_rmsf = r ** 2
+
+        # Robustness vs SASA
+        rho, _ = scipy_stats.spearmanr(sasa_valid["mean_abs_ddg"], sasa_valid["sasa"])
+        result.rho_robustness_sasa = rho
+
+        # Partial correlation: robustness vs RMSF, controlling for SASA
+        # partial_rho(X,Y|Z) = (rho_XY - rho_XZ * rho_YZ) /
+        #                      sqrt((1 - rho_XZ^2) * (1 - rho_YZ^2))
+        rho_xy, _ = scipy_stats.spearmanr(sasa_valid["mean_abs_ddg"], sasa_valid["rmsf_avg"])
+        rho_xz, _ = scipy_stats.spearmanr(sasa_valid["mean_abs_ddg"], sasa_valid["sasa"])
+        rho_yz, _ = scipy_stats.spearmanr(sasa_valid["sasa"], sasa_valid["rmsf_avg"])
+        denom = np.sqrt((1 - rho_xz**2) * (1 - rho_yz**2))
+        if denom > 1e-10:
+            partial_rho = (rho_xy - rho_xz * rho_yz) / denom
+            result.rho_robustness_rmsf_partial_sasa = partial_rho
+            # Approximate p-value for partial correlation (t-test)
+            n = len(sasa_valid)
+            if n > 3:
+                t_stat = partial_rho * np.sqrt((n - 3) / (1 - partial_rho**2 + 1e-10))
+                from scipy.stats import t as t_dist
+                result.pval_robustness_rmsf_partial_sasa = 2 * t_dist.sf(abs(t_stat), n - 3)
+
+    # --- Multiple regression: RMSF ~ robustness + SASA ---
+    if len(sasa_valid) >= 10:
+        from sklearn.linear_model import LinearRegression
+        y_s = sasa_valid["rmsf_avg"].values
+        X_sasa_only = sasa_valid[["sasa"]].values
+        X_rob_sasa = sasa_valid[["mean_abs_ddg", "sasa"]].values
+        r2_sasa_only = LinearRegression().fit(X_sasa_only, y_s).score(X_sasa_only, y_s)
+        r2_rob_sasa = LinearRegression().fit(X_rob_sasa, y_s).score(X_rob_sasa, y_s)
+        result.r2_joint_sasa = r2_rob_sasa
+        result.delta_r2_over_sasa = r2_rob_sasa - r2_sasa_only
 
     # --- Multiple regression: RMSF ~ robustness + pLDDT ---
     joint_valid = core.dropna(subset=["plddt"])
@@ -402,12 +490,21 @@ class PooledResult:
     pooled_r2_joint: float = np.nan
     pooled_delta_r2: float = np.nan
 
+    # Pooled SASA (burial baseline)
+    pooled_rho_sasa_rmsf: float = np.nan
+    pooled_r2_sasa_rmsf: float = np.nan
+    pooled_rho_robustness_rmsf_partial_sasa: float = np.nan
+    pooled_r2_joint_sasa: float = np.nan
+    pooled_delta_r2_over_sasa: float = np.nan
+
     # Distribution of per-protein correlations
     median_rho_robustness_rmsf: float = np.nan
     mean_rho_robustness_rmsf: float = np.nan
     std_rho_robustness_rmsf: float = np.nan
     median_rho_plddt_rmsf: float = np.nan
     mean_rho_plddt_rmsf: float = np.nan
+    median_rho_sasa_rmsf: float = np.nan
+    median_rho_partial_sasa: float = np.nan
 
     # Fraction of proteins where robustness beats pLDDT
     frac_robustness_beats_plddt: float = np.nan
@@ -430,6 +527,10 @@ def run_pooled_analysis(
                 if not np.isnan(r.rho_robustness_rmsf)]
     rhos_plddt = [r.rho_plddt_rmsf for r in per_protein_results
                   if not np.isnan(r.rho_plddt_rmsf)]
+    rhos_sasa = [r.rho_sasa_rmsf for r in per_protein_results
+                 if not np.isnan(r.rho_sasa_rmsf)]
+    rhos_partial = [r.rho_robustness_rmsf_partial_sasa for r in per_protein_results
+                    if not np.isnan(r.rho_robustness_rmsf_partial_sasa)]
 
     result.n_proteins = len(per_protein_results)
 
@@ -440,6 +541,10 @@ def run_pooled_analysis(
     if rhos_plddt:
         result.median_rho_plddt_rmsf = float(np.median(rhos_plddt))
         result.mean_rho_plddt_rmsf = float(np.mean(rhos_plddt))
+    if rhos_sasa:
+        result.median_rho_sasa_rmsf = float(np.median(rhos_sasa))
+    if rhos_partial:
+        result.median_rho_partial_sasa = float(np.median(rhos_partial))
 
     # Fraction where |rho_robustness| > |rho_plddt|
     both = [(r.rho_robustness_rmsf, r.rho_plddt_rmsf) for r in per_protein_results
@@ -455,7 +560,7 @@ def run_pooled_analysis(
         if len(df) < 10:
             continue
         # Z-score within protein to remove protein-level differences
-        for col in ["mean_abs_ddg", "rmsf_avg", "plddt"]:
+        for col in ["mean_abs_ddg", "rmsf_avg", "plddt", "sasa"]:
             if col in df.columns:
                 mu, sigma = df[col].mean(), df[col].std()
                 if sigma > 0:
@@ -501,6 +606,35 @@ def run_pooled_analysis(
             r2_j = LinearRegression().fit(X_joint, y).score(X_joint, y)
             result.pooled_r2_joint = r2_j
             result.pooled_delta_r2 = r2_j - r2_p
+
+    # Pooled SASA analysis (burial baseline)
+    if "sasa_z" in pooled.columns:
+        valid_sasa = pooled.dropna(subset=["sasa_z", "rmsf_avg_z"])
+        if len(valid_sasa) >= 20:
+            rho, _ = scipy_stats.spearmanr(valid_sasa["sasa_z"], valid_sasa["rmsf_avg_z"])
+            result.pooled_rho_sasa_rmsf = rho
+            r, _ = scipy_stats.pearsonr(valid_sasa["sasa_z"], valid_sasa["rmsf_avg_z"])
+            result.pooled_r2_sasa_rmsf = r ** 2
+
+        # Pooled partial correlation: robustness vs RMSF | SASA
+        valid_all = pooled.dropna(subset=["mean_abs_ddg_z", "sasa_z", "rmsf_avg_z"])
+        if len(valid_all) >= 20:
+            rho_xy, _ = scipy_stats.spearmanr(valid_all["mean_abs_ddg_z"], valid_all["rmsf_avg_z"])
+            rho_xz, _ = scipy_stats.spearmanr(valid_all["mean_abs_ddg_z"], valid_all["sasa_z"])
+            rho_yz, _ = scipy_stats.spearmanr(valid_all["sasa_z"], valid_all["rmsf_avg_z"])
+            denom = np.sqrt((1 - rho_xz**2) * (1 - rho_yz**2))
+            if denom > 1e-10:
+                result.pooled_rho_robustness_rmsf_partial_sasa = (rho_xy - rho_xz * rho_yz) / denom
+
+            # Pooled regression: RMSF ~ robustness + SASA
+            from sklearn.linear_model import LinearRegression
+            y = valid_all["rmsf_avg_z"].values
+            X_sasa = valid_all[["sasa_z"]].values
+            X_joint = valid_all[["mean_abs_ddg_z", "sasa_z"]].values
+            r2_s = LinearRegression().fit(X_sasa, y).score(X_sasa, y)
+            r2_j = LinearRegression().fit(X_joint, y).score(X_joint, y)
+            result.pooled_r2_joint_sasa = r2_j
+            result.pooled_delta_r2_over_sasa = r2_j - r2_s
 
     return result
 
@@ -791,9 +925,16 @@ def run_analysis_for_scorer(
         bfactor_df = load_atlas_bfactor(protein_dir)
         global_metrics = load_robustness_global(robustness_dir, scorer, pid)
 
+        # Compute SASA from PDB (uniform burial baseline for all proteins)
+        sasa_df = None
+        pdb_files = list(Path(protein_dir).glob("*.pdb"))
+        if pdb_files:
+            sasa_df = compute_sasa_from_pdb(str(pdb_files[0]))
+
         # Correlate
         result = correlate_single_protein(
-            pid, rob_df, rmsf_df, plddt_df, bfactor_df, global_metrics, scorer
+            pid, rob_df, rmsf_df, plddt_df, bfactor_df, global_metrics, scorer,
+            sasa_df=sasa_df,
         )
         if result is None:
             n_skip_too_short += 1
@@ -812,6 +953,8 @@ def run_analysis_for_scorer(
             merged = merged.merge(plddt_df[["position", "plddt"]], on="position", how="left")
         if bfactor_df is not None:
             merged = merged.merge(bfactor_df[["position", "bfactor"]], on="position", how="left")
+        if sasa_df is not None:
+            merged = merged.merge(sasa_df[["position", "sasa"]], on="position", how="left")
 
         # Secondary structure and burial (if DSSP available)
         if use_dssp:
@@ -871,6 +1014,10 @@ def run_analysis_for_scorer(
           f"{pooled.median_rho_robustness_rmsf:.3f}")
     print(f"Per-protein median rho (pLDDT vs RMSF):      "
           f"{pooled.median_rho_plddt_rmsf:.3f}")
+    print(f"Per-protein median rho (SASA vs RMSF):       "
+          f"{pooled.median_rho_sasa_rmsf:.3f}")
+    print(f"Per-protein median partial rho (rob|SASA):   "
+          f"{pooled.median_rho_partial_sasa:.3f}")
     print(f"Frac where |rho_robustness| > |rho_pLDDT|:   "
           f"{pooled.frac_robustness_beats_plddt:.3f}")
 
@@ -895,10 +1042,15 @@ def run_analysis_for_scorer(
     print(f"Pooled rho (robustness vs RMSF):  {pooled.pooled_rho_robustness_rmsf:.3f} "
           f"(p={pooled.pooled_pval_robustness_rmsf:.2e})")
     print(f"Pooled rho (pLDDT vs RMSF):       {pooled.pooled_rho_plddt_rmsf:.3f}")
+    print(f"Pooled rho (SASA vs RMSF):        {pooled.pooled_rho_sasa_rmsf:.3f}")
+    print(f"Pooled partial rho (rob|SASA):    {pooled.pooled_rho_robustness_rmsf_partial_sasa:.3f}")
     print(f"Pooled R^2 (robustness):           {pooled.pooled_r2_robustness_rmsf:.3f}")
     print(f"Pooled R^2 (pLDDT):                {pooled.pooled_r2_plddt_rmsf:.3f}")
-    print(f"Pooled R^2 (joint):                {pooled.pooled_r2_joint:.3f}")
-    print(f"Delta R^2 (joint - pLDDT):         {pooled.pooled_delta_r2:.3f}")
+    print(f"Pooled R^2 (SASA):                 {pooled.pooled_r2_sasa_rmsf:.3f}")
+    print(f"Pooled R^2 (rob+pLDDT):            {pooled.pooled_r2_joint:.3f}")
+    print(f"Pooled R^2 (rob+SASA):             {pooled.pooled_r2_joint_sasa:.3f}")
+    print(f"Delta R^2 (rob+pLDDT - pLDDT):     {pooled.pooled_delta_r2:.3f}")
+    print(f"Delta R^2 (rob+SASA - SASA):       {pooled.pooled_delta_r2_over_sasa:.3f}")
 
     if strat_ss:
         print(f"\nBy secondary structure:")
