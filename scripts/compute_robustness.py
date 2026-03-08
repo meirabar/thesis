@@ -865,11 +865,13 @@ def main():
                      "or --batch with --atlas_dir")
 
     # Process all proteins
+    import time as _time
     print(f"\nProcessing {len(proteins_to_process)} proteins with {scorer.name}")
     print(f"Output: {args.output_dir}/{scorer.name}/")
-    print("-" * 60)
+    print("-" * 60, flush=True)
 
     n_ok, n_skip, n_fail = 0, 0, 0
+    t_start = _time.time()
     for idx, (pid, seq, pdb_path) in enumerate(proteins_to_process):
         # Check if already done
         out_json = (Path(args.output_dir) / scorer.name /
@@ -878,22 +880,32 @@ def main():
             n_skip += 1
             if (idx + 1) % 100 == 0:
                 print(f"[{idx+1}/{len(proteins_to_process)}] ... "
-                      f"({n_ok} ok, {n_skip} skipped, {n_fail} failed)")
+                      f"({n_ok} ok, {n_skip} skipped, {n_fail} failed)",
+                      flush=True)
             continue
 
-        print(f"[{idx+1}/{len(proteins_to_process)}] {pid} (L={len(seq)})")
+        t0 = _time.time()
+        print(f"[{idx+1}/{len(proteins_to_process)}] {pid} (L={len(seq)}) ...",
+              end=" ", flush=True)
         success = process_single_protein(
             pid, seq, pdb_path, scorer, args.output_dir,
             skip_existing=args.skip_existing
         )
+        elapsed = _time.time() - t0
         if success:
             n_ok += 1
+            print(f"OK ({elapsed:.1f}s)", flush=True)
         else:
             n_fail += 1
+            print(f"FAILED ({elapsed:.1f}s)", flush=True)
 
+    total_elapsed = _time.time() - t_start
     print("-" * 60)
     print(f"Done! {n_ok} computed, {n_skip} skipped, {n_fail} failed")
-    print(f"Results in: {args.output_dir}/{scorer.name}/")
+    print(f"Total time: {total_elapsed:.0f}s ({total_elapsed/60:.1f} min)")
+    if n_ok > 0:
+        print(f"Avg per protein: {total_elapsed/n_ok:.1f}s")
+    print(f"Results in: {args.output_dir}/{scorer.name}/", flush=True)
 
 
 if __name__ == "__main__":
