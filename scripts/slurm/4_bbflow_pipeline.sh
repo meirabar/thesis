@@ -64,6 +64,9 @@ python "${REPO_DIR}/scripts/compute_robustness.py" \
     --scorer esm1v \
     --atlas_dir "${BBFLOW_PROCESSED}" \
     --output_dir "${BBFLOW_ROBUSTNESS}" \
+    --batch \
+    --batch_start 0 \
+    --batch_end 200 \
     --device cuda \
     --skip_existing
 echo ""
@@ -74,6 +77,9 @@ python "${REPO_DIR}/scripts/compute_robustness.py" \
     --scorer thermompnn \
     --atlas_dir "${BBFLOW_PROCESSED}" \
     --output_dir "${BBFLOW_ROBUSTNESS}" \
+    --batch \
+    --batch_start 0 \
+    --batch_end 200 \
     --device cuda \
     --skip_existing \
     --thermompnn_dir "${THERMOMPNN_DIR}"
