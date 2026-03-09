@@ -55,19 +55,30 @@ def extract_sequence_from_pdb(pdb_path: str) -> str:
 
 def compute_plddt_esmfold(sequence: str, model, tokenizer, backend: str,
                           device: str) -> np.ndarray:
-    """Run ESMFold on a sequence and return per-residue pLDDT (0-100 scale)."""
+    """Run ESMFold on a sequence and return per-residue pLDDT (0-100 scale).
+
+    Uses model.infer_pdb() which works for both Meta and HuggingFace backends,
+    then extracts pLDDT from the B-factor column of the output PDB string.
+    """
     with torch.no_grad():
-        if backend == "meta-esmfold":
-            output = model.infer(sequence)
-            plddt = output["plddt"].squeeze().cpu().numpy()
-        else:
-            # HuggingFace transformers backend
-            inputs = tokenizer([sequence], return_tensors="pt",
-                               add_special_tokens=False).to(device)
-            output = model(**inputs)
-            plddt = output.plddt.squeeze().cpu().numpy()  # shape (L,)
-    # Convert to 0-100 scale (AlphaFold convention)
-    if plddt.max() <= 1.0:
+        pdb_str = model.infer_pdb(sequence)
+
+    # Extract per-residue pLDDT from B-factor column of CA atoms
+    plddt_values = []
+    seen = set()
+    for line in pdb_str.splitlines():
+        if line.startswith("ATOM") and line[12:16].strip() == "CA":
+            resnum = line[22:27].strip()
+            chain = line[21]
+            key = (chain, resnum)
+            if key not in seen:
+                seen.add(key)
+                bfactor = float(line[60:66].strip())
+                plddt_values.append(bfactor)
+
+    plddt = np.array(plddt_values)
+    # Convert to 0-100 scale if needed (ESMFold typically outputs 0-100)
+    if len(plddt) > 0 and plddt.max() <= 1.0:
         plddt = plddt * 100.0
     return plddt
 
@@ -123,7 +134,9 @@ def main():
               flush=True)
     if device == "cuda":
         model = model.cuda()
-        model = model.half()
+        # Only half-precision the language model; the structure module breaks in fp16
+        if hasattr(model, "esm"):
+            model.esm = model.esm.half()
     print(f"Model loaded in {time.time() - t0:.1f}s on {device} ({backend})",
           flush=True)
     print()
