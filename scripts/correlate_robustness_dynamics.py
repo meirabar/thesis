@@ -869,8 +869,9 @@ def main():
                         help="Skip DSSP-based secondary structure assignment")
     parser.add_argument("--max_proteins", type=int, default=0,
                         help="Limit number of proteins (0=all, for testing)")
-    parser.add_argument("--exclude", type=str, nargs="*", default=[],
-                        help="Protein IDs to exclude (e.g. for fair comparison)")
+    parser.add_argument("--max_seq_length", type=int, default=0,
+                        help="Skip proteins longer than this (0=no limit, "
+                             "1024=match ESM-1v limit for fair comparison)")
     args = parser.parse_args()
 
     for scorer in args.scorer:
@@ -885,7 +886,7 @@ def main():
             make_figures=not args.no_figures,
             use_dssp=not args.no_dssp,
             max_proteins=args.max_proteins,
-            exclude_proteins=set(args.exclude),
+            max_seq_length=args.max_seq_length,
         )
 
 
@@ -897,7 +898,7 @@ def run_analysis_for_scorer(
     make_figures: bool = True,
     use_dssp: bool = True,
     max_proteins: int = 0,
-    exclude_proteins: Optional[set] = None,
+    max_seq_length: int = 0,
 ):
     """Run the full correlation analysis for one scorer."""
     out_dir = Path(output_dir) / scorer
@@ -915,15 +916,14 @@ def run_analysis_for_scorer(
         if d.is_dir() and (d / ".done").exists()
     ])
 
-    if exclude_proteins:
-        before = len(protein_ids)
-        protein_ids = [p for p in protein_ids if p not in exclude_proteins]
-        print(f"Excluded {before - len(protein_ids)} proteins")
-
     if max_proteins > 0:
         protein_ids = protein_ids[:max_proteins]
 
-    print(f"Found {len(protein_ids)} proteins in {dataset_label}")
+    if max_seq_length > 0:
+        print(f"Found {len(protein_ids)} proteins in {dataset_label} "
+              f"(max_seq_length={max_seq_length})")
+    else:
+        print(f"Found {len(protein_ids)} proteins in {dataset_label}")
 
     # Process each protein
     per_protein_results = []
@@ -931,6 +931,7 @@ def run_analysis_for_scorer(
     n_skip_no_robustness = 0
     n_skip_no_rmsf = 0
     n_skip_too_short = 0
+    n_skip_too_long = 0
 
     for idx, pid in enumerate(protein_ids):
         protein_dir = str(atlas_proteins_dir / pid)
@@ -939,6 +940,11 @@ def run_analysis_for_scorer(
         rob_df = load_robustness(robustness_dir, scorer, pid)
         if rob_df is None:
             n_skip_no_robustness += 1
+            continue
+
+        # Skip proteins exceeding max sequence length (e.g. ESM-1v 1024 limit)
+        if max_seq_length > 0 and len(rob_df) > max_seq_length:
+            n_skip_too_long += 1
             continue
 
         # Load RMSF
@@ -1013,7 +1019,8 @@ def run_analysis_for_scorer(
 
     print(f"\nProcessed: {len(per_protein_results)} proteins")
     print(f"Skipped: {n_skip_no_robustness} no robustness, "
-          f"{n_skip_no_rmsf} no RMSF, {n_skip_too_short} too short")
+          f"{n_skip_no_rmsf} no RMSF, {n_skip_too_short} too short, "
+          f"{n_skip_too_long} too long (>{max_seq_length})")
 
     if not per_protein_results:
         print("No proteins to analyze!")

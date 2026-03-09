@@ -11,6 +11,7 @@
 #   sbatch scripts/slurm/3_correlate.sh              # ESM-1v only
 #   sbatch scripts/slurm/3_correlate.sh --both        # both scorers
 #   sbatch scripts/slurm/3_correlate.sh --no-dssp     # skip DSSP
+#   sbatch scripts/slurm/3_correlate.sh --both --max-seq-length 1024
 # ============================================================================
 
 set -euo pipefail
@@ -23,12 +24,16 @@ fi
 # Parse args
 SCORERS="esm1v"
 EXTRA_FLAGS=""
-for arg in "$@"; do
-    case "$arg" in
-        --both)     SCORERS="esm1v thermompnn" ;;
-        --no-dssp)  EXTRA_FLAGS="${EXTRA_FLAGS} --no_dssp" ;;
+MAX_SEQ_LEN=""
+ARGS=("$@")
+for ((i=0; i<${#ARGS[@]}; i++)); do
+    case "${ARGS[i]}" in
+        --both)             SCORERS="esm1v thermompnn" ;;
+        --no-dssp)          EXTRA_FLAGS="${EXTRA_FLAGS} --no_dssp" ;;
+        --max-seq-length)   MAX_SEQ_LEN="${ARGS[i+1]}"; ((i++)) ;;
     esac
 done
+[[ -n "${MAX_SEQ_LEN}" ]] && EXTRA_FLAGS="${EXTRA_FLAGS} --max_seq_length ${MAX_SEQ_LEN}"
 
 source "${VENV_DIR}/bin/activate"
 

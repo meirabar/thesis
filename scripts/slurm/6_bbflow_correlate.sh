@@ -34,8 +34,7 @@ python "${REPO_DIR}/scripts/correlate_robustness_dynamics.py" \
     --atlas_dir "${BBFLOW_PROCESSED}" \
     --robustness_dir "${BBFLOW_ROBUSTNESS}" \
     --scorer esm1v thermompnn \
-    --output_dir "${BBFLOW_ANALYSIS}" \
-    --no_dssp
+    --output_dir "${BBFLOW_ANALYSIS}"
 
 echo ""
 echo "BBFlow analysis finished at $(date)"
