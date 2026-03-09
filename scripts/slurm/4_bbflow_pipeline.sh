@@ -19,7 +19,9 @@
 
 set -euo pipefail
 if [[ -z "${REPO_DIR:-}" ]]; then
-    source "$(dirname "${BASH_SOURCE[0]}")/config.sh"
+    _cfg="$(dirname "${BASH_SOURCE[0]}")/config.sh"
+    [[ ! -f "$_cfg" ]] && _cfg="${SLURM_SUBMIT_DIR:-$(pwd)}/scripts/slurm/config.sh"
+    source "$_cfg"
 fi
 
 source "${VENV_DIR}/bin/activate"
