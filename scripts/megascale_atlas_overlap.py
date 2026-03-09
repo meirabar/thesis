@@ -54,14 +54,41 @@ def load_atlas_ids(atlas_list_path: str) -> dict:
 
 
 def load_megascale_from_csv(csv_path: str) -> set:
-    """Load unique WT_name values from MegaScale Dataset1 CSV."""
+    """Load unique protein identifiers from MegaScale Dataset1 CSV.
+
+    Tries columns in order: 'WT_name', 'name', 'pdb_name'.
+    For 'name', extracts the base protein name (e.g., '1A32.pdb' from
+    a row that might encode mutations in other columns).
+    """
     wt_names = set()
+    col_candidates = ["WT_name", "name", "pdb_name"]
     with open(csv_path, newline="") as f:
         reader = csv.DictReader(f)
+        # Find which column exists
+        col_name = None
+        first_row = next(reader, None)
+        if first_row is None:
+            return wt_names
+        for c in col_candidates:
+            if c in first_row:
+                col_name = c
+                break
+        if col_name is None:
+            print(f"  WARNING: None of {col_candidates} found in CSV columns: "
+                  f"{list(first_row.keys())[:10]}")
+            return wt_names
+        print(f"  Using column '{col_name}' for protein identifiers")
+        # Process first row
+        val = first_row[col_name].strip()
+        if val:
+            # Extract base protein name: strip mutation suffixes if present
+            # e.g., "1A32.pdb" -> "1A32.pdb", "1A32_A5G.pdb" keep as-is
+            wt_names.add(val)
+        # Process remaining rows
         for row in reader:
-            wt_name = row.get("WT_name", "").strip()
-            if wt_name:
-                wt_names.add(wt_name)
+            val = row.get(col_name, "").strip()
+            if val:
+                wt_names.add(val)
     return wt_names
 
 
