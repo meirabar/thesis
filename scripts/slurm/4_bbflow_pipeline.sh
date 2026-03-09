@@ -24,12 +24,6 @@ fi
 
 source "${VENV_DIR}/bin/activate"
 
-# --- BBFlow-specific paths ---
-BBFLOW_RAW="${PROJECT_DIR}/data/bbflow_denovo/bbflow-de-novo-dataset"
-BBFLOW_PROCESSED="${PROJECT_DIR}/data/bbflow_processed"
-BBFLOW_ROBUSTNESS="${PROJECT_DIR}/data/bbflow_robustness"
-BBFLOW_ANALYSIS="${PROJECT_DIR}/data/bbflow_analysis"
-
 # Parse args
 SKIP_RMSF=false
 for arg in "$@"; do
