@@ -53,12 +53,19 @@ def extract_sequence_from_pdb(pdb_path: str) -> str:
     return "".join(residues)
 
 
-def compute_plddt_esmfold(sequence: str, model, device: str) -> np.ndarray:
+def compute_plddt_esmfold(sequence: str, model, tokenizer, backend: str,
+                          device: str) -> np.ndarray:
     """Run ESMFold on a sequence and return per-residue pLDDT (0-100 scale)."""
     with torch.no_grad():
-        output = model.infer(sequence)
-    # pLDDT is in output["plddt"], shape (1, L, 1), range 0-1
-    plddt = output["plddt"].squeeze().cpu().numpy()  # shape (L,)
+        if backend == "meta-esmfold":
+            output = model.infer(sequence)
+            plddt = output["plddt"].squeeze().cpu().numpy()
+        else:
+            # HuggingFace transformers backend
+            inputs = tokenizer([sequence], return_tensors="pt",
+                               add_special_tokens=False).to(device)
+            output = model(**inputs)
+            plddt = output.plddt.squeeze().cpu().numpy()  # shape (L,)
     # Convert to 0-100 scale (AlphaFold convention)
     if plddt.max() <= 1.0:
         plddt = plddt * 100.0
@@ -97,20 +104,28 @@ def main():
     print(f"Skip existing: {args.skip_existing}")
     print()
 
-    # Load ESMFold model
+    # Load ESMFold model (try Meta fair-esm first, fallback to HuggingFace)
     print("Loading ESMFold model...", flush=True)
     t0 = time.time()
-    import esm
-    model = esm.pretrained.esmfold_v1()
-    model = model.eval()
-    if args.device == "cuda" and torch.cuda.is_available():
+    device = args.device if torch.cuda.is_available() else "cpu"
+    tokenizer = None
+    try:
+        import esm
+        model = esm.pretrained.esmfold_v1().eval()
+        backend = "meta-esmfold"
+        print("  Using Meta fair-esm backend", flush=True)
+    except Exception:
+        from transformers import EsmForProteinFolding, AutoTokenizer
+        model = EsmForProteinFolding.from_pretrained("facebook/esmfold_v1").eval()
+        tokenizer = AutoTokenizer.from_pretrained("facebook/esmfold_v1")
+        backend = "hf-esmfold"
+        print("  Using HuggingFace transformers backend (no openfold needed)",
+              flush=True)
+    if device == "cuda":
         model = model.cuda()
-        # Use float16 for faster inference and lower memory
         model = model.half()
-        device = "cuda"
-    else:
-        device = "cpu"
-    print(f"Model loaded in {time.time() - t0:.1f}s on {device}", flush=True)
+    print(f"Model loaded in {time.time() - t0:.1f}s on {device} ({backend})",
+          flush=True)
     print()
 
     n_ok, n_skip, n_fail = 0, 0, 0
@@ -143,7 +158,8 @@ def main():
         # Run ESMFold
         t0 = time.time()
         try:
-            plddt = compute_plddt_esmfold(sequence, model, device)
+            plddt = compute_plddt_esmfold(sequence, model, tokenizer, backend,
+                                          device)
         except Exception as e:
             print(f"FAIL ({e})", flush=True)
             n_fail += 1
