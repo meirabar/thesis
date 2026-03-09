@@ -882,10 +882,11 @@ def run_analysis_for_scorer(
     out_dir = Path(output_dir) / scorer
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # Find proteins that have both ATLAS and robustness data
+    # Find proteins that have both data and robustness data
     atlas_proteins_dir = Path(atlas_dir) / "proteins"
+    dataset_label = Path(atlas_dir).name  # e.g. "atlas", "bbflow_processed"
     if not atlas_proteins_dir.exists():
-        print(f"ERROR: ATLAS proteins dir not found: {atlas_proteins_dir}")
+        print(f"ERROR: proteins dir not found: {atlas_proteins_dir}")
         return
 
     protein_ids = sorted([
@@ -896,7 +897,7 @@ def run_analysis_for_scorer(
     if max_proteins > 0:
         protein_ids = protein_ids[:max_proteins]
 
-    print(f"Found {len(protein_ids)} ATLAS proteins")
+    print(f"Found {len(protein_ids)} proteins in {dataset_label}")
 
     # Process each protein
     per_protein_results = []
