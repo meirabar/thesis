@@ -153,11 +153,11 @@ def load_robustness_global(robustness_dir: str, scorer: str, protein_id: str
 # ==========================================================================
 
 def assign_secondary_structure(pdb_path: str) -> Optional[List[str]]:
-    """Assign secondary structure using DSSP (if available) or a simple
-    heuristic based on phi/psi angles.
+    """Assign secondary structure using DSSP (BioPython) or mdtraj fallback.
 
     Returns list of 'H' (helix), 'E' (sheet), 'C' (coil) per residue.
     """
+    # Try BioPython DSSP first (requires external mkdssp binary)
     try:
         from Bio.PDB import PDBParser
         from Bio.PDB.DSSP import DSSP
@@ -174,6 +174,23 @@ def assign_secondary_structure(pdb_path: str) -> Optional[List[str]]:
                 ss_list.append("E")  # sheet
             else:
                 ss_list.append("C")  # coil/loop
+        return ss_list
+    except Exception:
+        pass
+
+    # Fallback: mdtraj DSSP (no external binary needed)
+    try:
+        import mdtraj
+        traj = mdtraj.load(pdb_path)
+        dssp = mdtraj.compute_dssp(traj)[0]  # shape (n_residues,)
+        ss_list = []
+        for ss in dssp:
+            if ss == 'H':
+                ss_list.append('H')
+            elif ss == 'E':
+                ss_list.append('E')
+            else:
+                ss_list.append('C')
         return ss_list
     except Exception:
         return None
@@ -852,6 +869,8 @@ def main():
                         help="Skip DSSP-based secondary structure assignment")
     parser.add_argument("--max_proteins", type=int, default=0,
                         help="Limit number of proteins (0=all, for testing)")
+    parser.add_argument("--exclude", type=str, nargs="*", default=[],
+                        help="Protein IDs to exclude (e.g. for fair comparison)")
     args = parser.parse_args()
 
     for scorer in args.scorer:
@@ -866,6 +885,7 @@ def main():
             make_figures=not args.no_figures,
             use_dssp=not args.no_dssp,
             max_proteins=args.max_proteins,
+            exclude_proteins=set(args.exclude),
         )
 
 
@@ -877,6 +897,7 @@ def run_analysis_for_scorer(
     make_figures: bool = True,
     use_dssp: bool = True,
     max_proteins: int = 0,
+    exclude_proteins: Optional[set] = None,
 ):
     """Run the full correlation analysis for one scorer."""
     out_dir = Path(output_dir) / scorer
@@ -893,6 +914,11 @@ def run_analysis_for_scorer(
         d.name for d in atlas_proteins_dir.iterdir()
         if d.is_dir() and (d / ".done").exists()
     ])
+
+    if exclude_proteins:
+        before = len(protein_ids)
+        protein_ids = [p for p in protein_ids if p not in exclude_proteins]
+        print(f"Excluded {before - len(protein_ids)} proteins")
 
     if max_proteins > 0:
         protein_ids = protein_ids[:max_proteins]
@@ -957,7 +983,7 @@ def run_analysis_for_scorer(
         if sasa_df is not None:
             merged = merged.merge(sasa_df[["position", "sasa"]], on="position", how="left")
 
-        # Secondary structure and burial (if DSSP available)
+        # Secondary structure and burial (if enabled)
         if use_dssp:
             pdb_files = list(Path(protein_dir).glob("*.pdb"))
             if pdb_files:
@@ -969,6 +995,14 @@ def run_analysis_for_scorer(
                     merged["rsa"] = burial
                     merged["burial_class"] = pd.cut(
                         merged["rsa"], bins=[0, 0.2, 0.5, 1.0],
+                        labels=["core", "boundary", "surface"]
+                    )
+                elif "sasa" in merged.columns and merged["sasa"].notna().sum() >= 10:
+                    # Fallback: SASA-based burial (quantile terciles)
+                    terciles = merged["sasa"].quantile([1/3, 2/3])
+                    merged["burial_class"] = pd.cut(
+                        merged["sasa"],
+                        bins=[-np.inf, terciles.iloc[0], terciles.iloc[1], np.inf],
                         labels=["core", "boundary", "surface"]
                     )
 
