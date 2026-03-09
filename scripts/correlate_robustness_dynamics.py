@@ -514,6 +514,13 @@ class PooledResult:
     pooled_r2_joint_sasa: float = np.nan
     pooled_delta_r2_over_sasa: float = np.nan
 
+    # Pooled B-factor (experimental dynamics baseline)
+    pooled_rho_bfactor_rmsf: float = np.nan
+    pooled_r2_bfactor_rmsf: float = np.nan
+    pooled_rho_robustness_bfactor: float = np.nan
+    pooled_r2_joint_bfactor: float = np.nan
+    pooled_delta_r2_over_bfactor: float = np.nan
+
     # Distribution of per-protein correlations
     median_rho_robustness_rmsf: float = np.nan
     mean_rho_robustness_rmsf: float = np.nan
@@ -522,6 +529,8 @@ class PooledResult:
     mean_rho_plddt_rmsf: float = np.nan
     median_rho_sasa_rmsf: float = np.nan
     median_rho_partial_sasa: float = np.nan
+    median_rho_bfactor_rmsf: float = np.nan
+    median_rho_robustness_bfactor: float = np.nan
 
     # Fraction of proteins where robustness beats pLDDT
     frac_robustness_beats_plddt: float = np.nan
@@ -548,6 +557,10 @@ def run_pooled_analysis(
                  if not np.isnan(r.rho_sasa_rmsf)]
     rhos_partial = [r.rho_robustness_rmsf_partial_sasa for r in per_protein_results
                     if not np.isnan(r.rho_robustness_rmsf_partial_sasa)]
+    rhos_bfactor = [r.rho_bfactor_rmsf for r in per_protein_results
+                    if not np.isnan(r.rho_bfactor_rmsf)]
+    rhos_rob_bf = [r.rho_robustness_bfactor for r in per_protein_results
+                   if not np.isnan(r.rho_robustness_bfactor)]
 
     result.n_proteins = len(per_protein_results)
 
@@ -562,6 +575,10 @@ def run_pooled_analysis(
         result.median_rho_sasa_rmsf = float(np.median(rhos_sasa))
     if rhos_partial:
         result.median_rho_partial_sasa = float(np.median(rhos_partial))
+    if rhos_bfactor:
+        result.median_rho_bfactor_rmsf = float(np.median(rhos_bfactor))
+    if rhos_rob_bf:
+        result.median_rho_robustness_bfactor = float(np.median(rhos_rob_bf))
 
     # Fraction where |rho_robustness| > |rho_plddt|
     both = [(r.rho_robustness_rmsf, r.rho_plddt_rmsf) for r in per_protein_results
@@ -577,7 +594,7 @@ def run_pooled_analysis(
         if len(df) < 10:
             continue
         # Z-score within protein to remove protein-level differences
-        for col in ["mean_abs_ddg", "rmsf_avg", "plddt", "sasa"]:
+        for col in ["mean_abs_ddg", "rmsf_avg", "plddt", "sasa", "bfactor"]:
             if col in df.columns:
                 mu, sigma = df[col].mean(), df[col].std()
                 if sigma > 0:
@@ -652,6 +669,33 @@ def run_pooled_analysis(
             r2_j = LinearRegression().fit(X_joint, y).score(X_joint, y)
             result.pooled_r2_joint_sasa = r2_j
             result.pooled_delta_r2_over_sasa = r2_j - r2_s
+
+    # Pooled B-factor analysis (experimental dynamics baseline)
+    if "bfactor_z" in pooled.columns:
+        valid_bf = pooled.dropna(subset=["bfactor_z", "rmsf_avg_z"])
+        if len(valid_bf) >= 20:
+            rho, _ = scipy_stats.spearmanr(valid_bf["bfactor_z"], valid_bf["rmsf_avg_z"])
+            result.pooled_rho_bfactor_rmsf = rho
+            r, _ = scipy_stats.pearsonr(valid_bf["bfactor_z"], valid_bf["rmsf_avg_z"])
+            result.pooled_r2_bfactor_rmsf = r ** 2
+
+        # Robustness vs B-factor
+        valid_rob_bf = pooled.dropna(subset=["mean_abs_ddg_z", "bfactor_z"])
+        if len(valid_rob_bf) >= 20:
+            rho, _ = scipy_stats.spearmanr(valid_rob_bf["mean_abs_ddg_z"], valid_rob_bf["bfactor_z"])
+            result.pooled_rho_robustness_bfactor = rho
+
+        # Joint regression: RMSF ~ robustness + B-factor
+        valid_all_bf = pooled.dropna(subset=["mean_abs_ddg_z", "bfactor_z", "rmsf_avg_z"])
+        if len(valid_all_bf) >= 20:
+            from sklearn.linear_model import LinearRegression
+            y = valid_all_bf["rmsf_avg_z"].values
+            X_bf = valid_all_bf[["bfactor_z"]].values
+            X_joint = valid_all_bf[["mean_abs_ddg_z", "bfactor_z"]].values
+            r2_bf = LinearRegression().fit(X_bf, y).score(X_bf, y)
+            r2_j = LinearRegression().fit(X_joint, y).score(X_joint, y)
+            result.pooled_r2_joint_bfactor = r2_j
+            result.pooled_delta_r2_over_bfactor = r2_j - r2_bf
 
     return result
 
@@ -1058,6 +1102,11 @@ def run_analysis_for_scorer(
           f"{pooled.median_rho_plddt_rmsf:.3f}")
     print(f"Per-protein median rho (SASA vs RMSF):       "
           f"{pooled.median_rho_sasa_rmsf:.3f}")
+    if not np.isnan(pooled.median_rho_bfactor_rmsf):
+        print(f"Per-protein median rho (Bfactor vs RMSF):   "
+              f"{pooled.median_rho_bfactor_rmsf:.3f}")
+        print(f"Per-protein median rho (rob vs Bfactor):    "
+              f"{pooled.median_rho_robustness_bfactor:.3f}")
     print(f"Per-protein median partial rho (rob|SASA):   "
           f"{pooled.median_rho_partial_sasa:.3f}")
     print(f"Frac where |rho_robustness| > |rho_pLDDT|:   "
@@ -1093,6 +1142,12 @@ def run_analysis_for_scorer(
     print(f"Pooled R^2 (rob+SASA):             {pooled.pooled_r2_joint_sasa:.3f}")
     print(f"Delta R^2 (rob+pLDDT - pLDDT):     {pooled.pooled_delta_r2:.3f}")
     print(f"Delta R^2 (rob+SASA - SASA):       {pooled.pooled_delta_r2_over_sasa:.3f}")
+    if not np.isnan(pooled.pooled_rho_bfactor_rmsf):
+        print(f"Pooled rho (Bfactor vs RMSF):      {pooled.pooled_rho_bfactor_rmsf:.3f}")
+        print(f"Pooled rho (rob vs Bfactor):       {pooled.pooled_rho_robustness_bfactor:.3f}")
+        print(f"Pooled R^2 (Bfactor):               {pooled.pooled_r2_bfactor_rmsf:.3f}")
+        print(f"Pooled R^2 (rob+Bfactor):           {pooled.pooled_r2_joint_bfactor:.3f}")
+        print(f"Delta R^2 (rob+Bfactor - Bfactor): {pooled.pooled_delta_r2_over_bfactor:.3f}")
 
     if strat_ss:
         print(f"\nBy secondary structure:")
