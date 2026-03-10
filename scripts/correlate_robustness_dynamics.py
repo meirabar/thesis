@@ -240,6 +240,44 @@ def compute_sasa_from_pdb(pdb_path: str) -> Optional[pd.DataFrame]:
 
 
 # ==========================================================================
+# HELPER: PARTIAL CORRELATION
+# ==========================================================================
+
+def partial_spearman(x, y, z):
+    """Compute partial Spearman correlation rho(X,Y|Z).
+
+    Returns (partial_rho, p_value) or (nan, nan) if degenerate.
+    """
+    rho_xy, _ = scipy_stats.spearmanr(x, y)
+    rho_xz, _ = scipy_stats.spearmanr(x, z)
+    rho_yz, _ = scipy_stats.spearmanr(y, z)
+    denom = np.sqrt((1 - rho_xz**2) * (1 - rho_yz**2))
+    if denom < 1e-10:
+        return np.nan, np.nan
+    partial_rho = (rho_xy - rho_xz * rho_yz) / denom
+    n = len(x)
+    if n <= 3:
+        return partial_rho, np.nan
+    t_stat = partial_rho * np.sqrt((n - 3) / (1 - partial_rho**2 + 1e-10))
+    from scipy.stats import t as t_dist
+    pval = 2 * t_dist.sf(abs(t_stat), n - 3)
+    return partial_rho, pval
+
+
+def regression_delta_r2(X_base, X_joint, y):
+    """Compute R² for base model and joint model, return (r2_base, r2_joint, delta_r2).
+
+    X_base: ndarray (n, k1) — baseline features
+    X_joint: ndarray (n, k2) — baseline + new features
+    y: ndarray (n,) — target
+    """
+    from sklearn.linear_model import LinearRegression
+    r2_base = LinearRegression().fit(X_base, y).score(X_base, y)
+    r2_joint = LinearRegression().fit(X_joint, y).score(X_joint, y)
+    return r2_base, r2_joint, r2_joint - r2_base
+
+
+# ==========================================================================
 # CORRELATION ANALYSIS
 # ==========================================================================
 
@@ -301,6 +339,34 @@ class PerProteinResult:
     # Multiple regression with best robustness combo: RMSF ~ mean_abs_ddg + frac_destab + pLDDT
     r2_joint_multi_rob: float = np.nan
     delta_r2_multi_rob_over_plddt: float = np.nan
+
+    # === B-factor as TARGET (predicting experimental dynamics) ===
+    # Robustness vs B-factor (primary)
+    rho_robustness_bfactor_target: float = np.nan
+    pval_robustness_bfactor_target: float = np.nan
+    r2_robustness_bfactor_target: float = np.nan
+
+    # pLDDT vs B-factor (baseline)
+    rho_plddt_bfactor: float = np.nan
+    r2_plddt_bfactor: float = np.nan
+
+    # SASA vs B-factor
+    rho_sasa_bfactor: float = np.nan
+    r2_sasa_bfactor: float = np.nan
+
+    # Partial correlation: robustness vs B-factor, controlling for SASA
+    rho_robustness_bfactor_partial_sasa: float = np.nan
+
+    # Partial correlation: robustness vs B-factor, controlling for pLDDT
+    rho_robustness_bfactor_partial_plddt: float = np.nan
+
+    # Multiple regression: B-factor ~ robustness + pLDDT
+    r2_bfactor_joint_plddt: float = np.nan
+    delta_r2_bfactor_over_plddt: float = np.nan
+
+    # Multiple regression: B-factor ~ robustness + SASA
+    r2_bfactor_joint_sasa: float = np.nan
+    delta_r2_bfactor_over_sasa: float = np.nan
 
     # Global robustness metrics
     global_mean_abs_ddg: float = np.nan
@@ -415,21 +481,13 @@ def correlate_single_protein(
         result.rho_robustness_sasa = rho
 
         # Partial correlation: robustness vs RMSF, controlling for SASA
-        # partial_rho(X,Y|Z) = (rho_XY - rho_XZ * rho_YZ) /
-        #                      sqrt((1 - rho_XZ^2) * (1 - rho_YZ^2))
-        rho_xy, _ = scipy_stats.spearmanr(sasa_valid["mean_abs_ddg"], sasa_valid["rmsf_avg"])
-        rho_xz, _ = scipy_stats.spearmanr(sasa_valid["mean_abs_ddg"], sasa_valid["sasa"])
-        rho_yz, _ = scipy_stats.spearmanr(sasa_valid["sasa"], sasa_valid["rmsf_avg"])
-        denom = np.sqrt((1 - rho_xz**2) * (1 - rho_yz**2))
-        if denom > 1e-10:
-            partial_rho = (rho_xy - rho_xz * rho_yz) / denom
-            result.rho_robustness_rmsf_partial_sasa = partial_rho
-            # Approximate p-value for partial correlation (t-test)
-            n = len(sasa_valid)
-            if n > 3:
-                t_stat = partial_rho * np.sqrt((n - 3) / (1 - partial_rho**2 + 1e-10))
-                from scipy.stats import t as t_dist
-                result.pval_robustness_rmsf_partial_sasa = 2 * t_dist.sf(abs(t_stat), n - 3)
+        pr, pval_pr = partial_spearman(
+            sasa_valid["mean_abs_ddg"].values,
+            sasa_valid["rmsf_avg"].values,
+            sasa_valid["sasa"].values,
+        )
+        result.rho_robustness_rmsf_partial_sasa = pr
+        result.pval_robustness_rmsf_partial_sasa = pval_pr
 
     # --- Multiple regression: RMSF ~ robustness + SASA ---
     if len(sasa_valid) >= 10:
@@ -474,6 +532,76 @@ def correlate_single_protein(
                 result.r2_joint_multi_rob = r2_multi
                 result.delta_r2_multi_rob_over_plddt = r2_multi - r2_plddt_only
 
+    # =====================================================================
+    # B-FACTOR AS TARGET (predicting experimental dynamics)
+    # =====================================================================
+    bfac_target = core.dropna(subset=["bfactor"])
+    if len(bfac_target) >= 10:
+        from sklearn.linear_model import LinearRegression
+
+        # --- Robustness vs B-factor (primary) ---
+        rho, pval = scipy_stats.spearmanr(bfac_target["mean_abs_ddg"], bfac_target["bfactor"])
+        result.rho_robustness_bfactor_target = rho
+        result.pval_robustness_bfactor_target = pval
+        r, _ = scipy_stats.pearsonr(bfac_target["mean_abs_ddg"], bfac_target["bfactor"])
+        result.r2_robustness_bfactor_target = r ** 2
+
+        # --- pLDDT vs B-factor (baseline) ---
+        bf_plddt = bfac_target.dropna(subset=["plddt"])
+        if len(bf_plddt) >= 10:
+            rho, _ = scipy_stats.spearmanr(bf_plddt["plddt"], bf_plddt["bfactor"])
+            result.rho_plddt_bfactor = rho
+            r, _ = scipy_stats.pearsonr(bf_plddt["plddt"], bf_plddt["bfactor"])
+            result.r2_plddt_bfactor = r ** 2
+
+        # --- SASA vs B-factor ---
+        bf_sasa = bfac_target.dropna(subset=["sasa"])
+        if len(bf_sasa) >= 10:
+            rho, _ = scipy_stats.spearmanr(bf_sasa["sasa"], bf_sasa["bfactor"])
+            result.rho_sasa_bfactor = rho
+            r, _ = scipy_stats.pearsonr(bf_sasa["sasa"], bf_sasa["bfactor"])
+            result.r2_sasa_bfactor = r ** 2
+
+        # --- Partial: robustness vs B-factor | SASA ---
+        if len(bf_sasa) >= 10:
+            pr, _ = partial_spearman(
+                bf_sasa["mean_abs_ddg"].values,
+                bf_sasa["bfactor"].values,
+                bf_sasa["sasa"].values,
+            )
+            result.rho_robustness_bfactor_partial_sasa = pr
+
+        # --- Partial: robustness vs B-factor | pLDDT ---
+        if len(bf_plddt) >= 10:
+            pr, _ = partial_spearman(
+                bf_plddt["mean_abs_ddg"].values,
+                bf_plddt["bfactor"].values,
+                bf_plddt["plddt"].values,
+            )
+            result.rho_robustness_bfactor_partial_plddt = pr
+
+        # --- Regression: B-factor ~ robustness + pLDDT ---
+        if len(bf_plddt) >= 10:
+            y_bf = bf_plddt["bfactor"].values
+            _, r2_j, dr2 = regression_delta_r2(
+                bf_plddt[["plddt"]].values,
+                bf_plddt[["mean_abs_ddg", "plddt"]].values,
+                y_bf,
+            )
+            result.r2_bfactor_joint_plddt = r2_j
+            result.delta_r2_bfactor_over_plddt = dr2
+
+        # --- Regression: B-factor ~ robustness + SASA ---
+        if len(bf_sasa) >= 10:
+            y_bf = bf_sasa["bfactor"].values
+            _, r2_j, dr2 = regression_delta_r2(
+                bf_sasa[["sasa"]].values,
+                bf_sasa[["mean_abs_ddg", "sasa"]].values,
+                y_bf,
+            )
+            result.r2_bfactor_joint_sasa = r2_j
+            result.delta_r2_bfactor_over_sasa = dr2
+
     # --- Global metrics ---
     if global_metrics:
         result.global_mean_abs_ddg = global_metrics.get("global_mean_abs_ddg", np.nan)
@@ -514,12 +642,33 @@ class PooledResult:
     pooled_r2_joint_sasa: float = np.nan
     pooled_delta_r2_over_sasa: float = np.nan
 
-    # Pooled B-factor (experimental dynamics baseline)
+    # Pooled B-factor (experimental dynamics baseline — predicting RMSF)
     pooled_rho_bfactor_rmsf: float = np.nan
     pooled_r2_bfactor_rmsf: float = np.nan
     pooled_rho_robustness_bfactor: float = np.nan
     pooled_r2_joint_bfactor: float = np.nan
     pooled_delta_r2_over_bfactor: float = np.nan
+
+    # === B-FACTOR AS TARGET (predicting experimental dynamics) ===
+    # Pooled: robustness → B-factor
+    pooled_rho_robustness_bfactor_target: float = np.nan
+    pooled_r2_robustness_bfactor_target: float = np.nan
+    # Pooled: pLDDT → B-factor (baseline)
+    pooled_rho_plddt_bfactor: float = np.nan
+    pooled_r2_plddt_bfactor: float = np.nan
+    # Pooled: SASA → B-factor
+    pooled_rho_sasa_bfactor: float = np.nan
+    pooled_r2_sasa_bfactor: float = np.nan
+    # Pooled partial: robustness vs B-factor | SASA
+    pooled_rho_robustness_bfactor_partial_sasa: float = np.nan
+    # Pooled partial: robustness vs B-factor | pLDDT
+    pooled_rho_robustness_bfactor_partial_plddt: float = np.nan
+    # Pooled regression: B-factor ~ robustness + pLDDT
+    pooled_r2_bfactor_joint_plddt: float = np.nan
+    pooled_delta_r2_bfactor_over_plddt: float = np.nan
+    # Pooled regression: B-factor ~ robustness + SASA
+    pooled_r2_bfactor_joint_sasa: float = np.nan
+    pooled_delta_r2_bfactor_over_sasa: float = np.nan
 
     # Distribution of per-protein correlations
     median_rho_robustness_rmsf: float = np.nan
@@ -532,8 +681,16 @@ class PooledResult:
     median_rho_bfactor_rmsf: float = np.nan
     median_rho_robustness_bfactor: float = np.nan
 
+    # B-factor-as-target per-protein medians
+    median_rho_robustness_bfactor_target: float = np.nan
+    median_rho_plddt_bfactor: float = np.nan
+    median_rho_sasa_bfactor: float = np.nan
+    median_rho_robustness_bfactor_partial_sasa: float = np.nan
+    median_rho_robustness_bfactor_partial_plddt: float = np.nan
+
     # Fraction of proteins where robustness beats pLDDT
     frac_robustness_beats_plddt: float = np.nan
+    frac_robustness_beats_plddt_bfactor: float = np.nan  # for B-factor target
 
 
 def run_pooled_analysis(
@@ -580,12 +737,33 @@ def run_pooled_analysis(
     if rhos_rob_bf:
         result.median_rho_robustness_bfactor = float(np.median(rhos_rob_bf))
 
-    # Fraction where |rho_robustness| > |rho_plddt|
+    # B-factor-as-target per-protein medians
+    def _median_attr(attr):
+        vals = [getattr(r, attr) for r in per_protein_results
+                if not np.isnan(getattr(r, attr))]
+        return float(np.median(vals)) if vals else np.nan
+
+    result.median_rho_robustness_bfactor_target = _median_attr("rho_robustness_bfactor_target")
+    result.median_rho_plddt_bfactor = _median_attr("rho_plddt_bfactor")
+    result.median_rho_sasa_bfactor = _median_attr("rho_sasa_bfactor")
+    result.median_rho_robustness_bfactor_partial_sasa = _median_attr("rho_robustness_bfactor_partial_sasa")
+    result.median_rho_robustness_bfactor_partial_plddt = _median_attr("rho_robustness_bfactor_partial_plddt")
+
+    # Fraction where |rho_robustness| > |rho_plddt| (RMSF target)
     both = [(r.rho_robustness_rmsf, r.rho_plddt_rmsf) for r in per_protein_results
             if not np.isnan(r.rho_robustness_rmsf) and not np.isnan(r.rho_plddt_rmsf)]
     if both:
         beats = sum(1 for rr, rp in both if abs(rr) > abs(rp))
         result.frac_robustness_beats_plddt = beats / len(both)
+
+    # Fraction where |rho_robustness| > |rho_plddt| (B-factor target)
+    both_bf = [(r.rho_robustness_bfactor_target, r.rho_plddt_bfactor)
+               for r in per_protein_results
+               if not np.isnan(r.rho_robustness_bfactor_target)
+               and not np.isnan(r.rho_plddt_bfactor)]
+    if both_bf:
+        beats_bf = sum(1 for rr, rp in both_bf if abs(rr) > abs(rp))
+        result.frac_robustness_beats_plddt_bfactor = beats_bf / len(both_bf)
 
     # Pool all residues (z-scored per protein)
     all_rows = []
@@ -653,24 +831,23 @@ def run_pooled_analysis(
         # Pooled partial correlation: robustness vs RMSF | SASA
         valid_all = pooled.dropna(subset=["mean_abs_ddg_z", "sasa_z", "rmsf_avg_z"])
         if len(valid_all) >= 20:
-            rho_xy, _ = scipy_stats.spearmanr(valid_all["mean_abs_ddg_z"], valid_all["rmsf_avg_z"])
-            rho_xz, _ = scipy_stats.spearmanr(valid_all["mean_abs_ddg_z"], valid_all["sasa_z"])
-            rho_yz, _ = scipy_stats.spearmanr(valid_all["sasa_z"], valid_all["rmsf_avg_z"])
-            denom = np.sqrt((1 - rho_xz**2) * (1 - rho_yz**2))
-            if denom > 1e-10:
-                result.pooled_rho_robustness_rmsf_partial_sasa = (rho_xy - rho_xz * rho_yz) / denom
+            pr, _ = partial_spearman(
+                valid_all["mean_abs_ddg_z"].values,
+                valid_all["rmsf_avg_z"].values,
+                valid_all["sasa_z"].values,
+            )
+            result.pooled_rho_robustness_rmsf_partial_sasa = pr
 
             # Pooled regression: RMSF ~ robustness + SASA
-            from sklearn.linear_model import LinearRegression
-            y = valid_all["rmsf_avg_z"].values
-            X_sasa = valid_all[["sasa_z"]].values
-            X_joint = valid_all[["mean_abs_ddg_z", "sasa_z"]].values
-            r2_s = LinearRegression().fit(X_sasa, y).score(X_sasa, y)
-            r2_j = LinearRegression().fit(X_joint, y).score(X_joint, y)
+            _, r2_j, dr2 = regression_delta_r2(
+                valid_all[["sasa_z"]].values,
+                valid_all[["mean_abs_ddg_z", "sasa_z"]].values,
+                valid_all["rmsf_avg_z"].values,
+            )
             result.pooled_r2_joint_sasa = r2_j
-            result.pooled_delta_r2_over_sasa = r2_j - r2_s
+            result.pooled_delta_r2_over_sasa = dr2
 
-    # Pooled B-factor analysis (experimental dynamics baseline)
+    # Pooled B-factor analysis (predicting RMSF from B-factor)
     if "bfactor_z" in pooled.columns:
         valid_bf = pooled.dropna(subset=["bfactor_z", "rmsf_avg_z"])
         if len(valid_bf) >= 20:
@@ -679,7 +856,7 @@ def run_pooled_analysis(
             r, _ = scipy_stats.pearsonr(valid_bf["bfactor_z"], valid_bf["rmsf_avg_z"])
             result.pooled_r2_bfactor_rmsf = r ** 2
 
-        # Robustness vs B-factor
+        # Robustness vs B-factor (cross-predictor correlation)
         valid_rob_bf = pooled.dropna(subset=["mean_abs_ddg_z", "bfactor_z"])
         if len(valid_rob_bf) >= 20:
             rho, _ = scipy_stats.spearmanr(valid_rob_bf["mean_abs_ddg_z"], valid_rob_bf["bfactor_z"])
@@ -688,14 +865,89 @@ def run_pooled_analysis(
         # Joint regression: RMSF ~ robustness + B-factor
         valid_all_bf = pooled.dropna(subset=["mean_abs_ddg_z", "bfactor_z", "rmsf_avg_z"])
         if len(valid_all_bf) >= 20:
-            from sklearn.linear_model import LinearRegression
-            y = valid_all_bf["rmsf_avg_z"].values
-            X_bf = valid_all_bf[["bfactor_z"]].values
-            X_joint = valid_all_bf[["mean_abs_ddg_z", "bfactor_z"]].values
-            r2_bf = LinearRegression().fit(X_bf, y).score(X_bf, y)
-            r2_j = LinearRegression().fit(X_joint, y).score(X_joint, y)
+            _, r2_j, dr2 = regression_delta_r2(
+                valid_all_bf[["bfactor_z"]].values,
+                valid_all_bf[["mean_abs_ddg_z", "bfactor_z"]].values,
+                valid_all_bf["rmsf_avg_z"].values,
+            )
             result.pooled_r2_joint_bfactor = r2_j
-            result.pooled_delta_r2_over_bfactor = r2_j - r2_bf
+            result.pooled_delta_r2_over_bfactor = dr2
+
+    # =================================================================
+    # POOLED B-FACTOR AS TARGET (predicting experimental dynamics)
+    # =================================================================
+    if "bfactor_z" in pooled.columns:
+        valid_bf_t = pooled.dropna(subset=["mean_abs_ddg_z", "bfactor_z"])
+        if len(valid_bf_t) >= 20:
+            # Robustness → B-factor
+            rho, _ = scipy_stats.spearmanr(valid_bf_t["mean_abs_ddg_z"], valid_bf_t["bfactor_z"])
+            result.pooled_rho_robustness_bfactor_target = rho
+            r, _ = scipy_stats.pearsonr(valid_bf_t["mean_abs_ddg_z"], valid_bf_t["bfactor_z"])
+            result.pooled_r2_robustness_bfactor_target = r ** 2
+
+        # pLDDT → B-factor (baseline)
+        if "plddt_z" in pooled.columns:
+            valid_pb = pooled.dropna(subset=["plddt_z", "bfactor_z"])
+            if len(valid_pb) >= 20:
+                rho, _ = scipy_stats.spearmanr(valid_pb["plddt_z"], valid_pb["bfactor_z"])
+                result.pooled_rho_plddt_bfactor = rho
+                r, _ = scipy_stats.pearsonr(valid_pb["plddt_z"], valid_pb["bfactor_z"])
+                result.pooled_r2_plddt_bfactor = r ** 2
+
+        # SASA → B-factor
+        if "sasa_z" in pooled.columns:
+            valid_sb = pooled.dropna(subset=["sasa_z", "bfactor_z"])
+            if len(valid_sb) >= 20:
+                rho, _ = scipy_stats.spearmanr(valid_sb["sasa_z"], valid_sb["bfactor_z"])
+                result.pooled_rho_sasa_bfactor = rho
+                r, _ = scipy_stats.pearsonr(valid_sb["sasa_z"], valid_sb["bfactor_z"])
+                result.pooled_r2_sasa_bfactor = r ** 2
+
+        # Partial: robustness vs B-factor | SASA
+        if "sasa_z" in pooled.columns:
+            valid_rbs = pooled.dropna(subset=["mean_abs_ddg_z", "bfactor_z", "sasa_z"])
+            if len(valid_rbs) >= 20:
+                pr, _ = partial_spearman(
+                    valid_rbs["mean_abs_ddg_z"].values,
+                    valid_rbs["bfactor_z"].values,
+                    valid_rbs["sasa_z"].values,
+                )
+                result.pooled_rho_robustness_bfactor_partial_sasa = pr
+
+        # Partial: robustness vs B-factor | pLDDT
+        if "plddt_z" in pooled.columns:
+            valid_rbp = pooled.dropna(subset=["mean_abs_ddg_z", "bfactor_z", "plddt_z"])
+            if len(valid_rbp) >= 20:
+                pr, _ = partial_spearman(
+                    valid_rbp["mean_abs_ddg_z"].values,
+                    valid_rbp["bfactor_z"].values,
+                    valid_rbp["plddt_z"].values,
+                )
+                result.pooled_rho_robustness_bfactor_partial_plddt = pr
+
+        # Regression: B-factor ~ robustness + pLDDT
+        if "plddt_z" in pooled.columns:
+            valid_bfp = pooled.dropna(subset=["mean_abs_ddg_z", "plddt_z", "bfactor_z"])
+            if len(valid_bfp) >= 20:
+                _, r2_j, dr2 = regression_delta_r2(
+                    valid_bfp[["plddt_z"]].values,
+                    valid_bfp[["mean_abs_ddg_z", "plddt_z"]].values,
+                    valid_bfp["bfactor_z"].values,
+                )
+                result.pooled_r2_bfactor_joint_plddt = r2_j
+                result.pooled_delta_r2_bfactor_over_plddt = dr2
+
+        # Regression: B-factor ~ robustness + SASA
+        if "sasa_z" in pooled.columns:
+            valid_bfs = pooled.dropna(subset=["mean_abs_ddg_z", "sasa_z", "bfactor_z"])
+            if len(valid_bfs) >= 20:
+                _, r2_j, dr2 = regression_delta_r2(
+                    valid_bfs[["sasa_z"]].values,
+                    valid_bfs[["mean_abs_ddg_z", "sasa_z"]].values,
+                    valid_bfs["bfactor_z"].values,
+                )
+                result.pooled_r2_bfactor_joint_sasa = r2_j
+                result.pooled_delta_r2_bfactor_over_sasa = dr2
 
     return result
 
@@ -710,19 +962,22 @@ def run_stratified_analysis(
 ) -> Dict[str, Dict[str, float]]:
     """Run correlation analysis stratified by a categorical column.
 
+    Computes correlations for both RMSF-as-target and B-factor-as-target.
+
     Args:
         per_protein_data: list of (merged_df, protein_id)
         stratify_col: column name to stratify by (e.g., "ss", "burial_class")
 
     Returns:
-        Dict mapping category -> {rho_robustness_rmsf, rho_plddt_rmsf, n_residues}
+        Dict mapping category -> {rho_robustness_rmsf, rho_plddt_rmsf,
+                                   rho_robustness_bfactor, rho_plddt_bfactor, ...}
     """
     all_rows = []
     for merged_df, pid in per_protein_data:
         df = merged_df.dropna(subset=["mean_abs_ddg", "rmsf_avg"]).copy()
         if stratify_col not in df.columns or len(df) < 5:
             continue
-        for col in ["mean_abs_ddg", "rmsf_avg", "plddt"]:
+        for col in ["mean_abs_ddg", "rmsf_avg", "plddt", "bfactor", "sasa"]:
             if col in df.columns:
                 mu, sigma = df[col].mean(), df[col].std()
                 df[f"{col}_z"] = (df[col] - mu) / sigma if sigma > 0 else 0.0
@@ -739,6 +994,7 @@ def run_stratified_analysis(
             continue
         entry = {"n_residues": len(group)}
 
+        # --- RMSF as target ---
         valid = group.dropna(subset=["mean_abs_ddg_z", "rmsf_avg_z"])
         if len(valid) >= 20:
             rho, pval = scipy_stats.spearmanr(valid["mean_abs_ddg_z"], valid["rmsf_avg_z"])
@@ -750,6 +1006,25 @@ def run_stratified_analysis(
             if len(valid_p) >= 20:
                 rho, _ = scipy_stats.spearmanr(valid_p["plddt_z"], valid_p["rmsf_avg_z"])
                 entry["rho_plddt_rmsf"] = rho
+
+        # --- B-factor as target ---
+        if "bfactor_z" in group.columns:
+            valid_rb = group.dropna(subset=["mean_abs_ddg_z", "bfactor_z"])
+            if len(valid_rb) >= 20:
+                rho, _ = scipy_stats.spearmanr(valid_rb["mean_abs_ddg_z"], valid_rb["bfactor_z"])
+                entry["rho_robustness_bfactor"] = rho
+
+            if "plddt_z" in group.columns:
+                valid_pb = group.dropna(subset=["plddt_z", "bfactor_z"])
+                if len(valid_pb) >= 20:
+                    rho, _ = scipy_stats.spearmanr(valid_pb["plddt_z"], valid_pb["bfactor_z"])
+                    entry["rho_plddt_bfactor"] = rho
+
+            if "sasa_z" in group.columns:
+                valid_sb = group.dropna(subset=["sasa_z", "bfactor_z"])
+                if len(valid_sb) >= 20:
+                    rho, _ = scipy_stats.spearmanr(valid_sb["sasa_z"], valid_sb["bfactor_z"])
+                    entry["rho_sasa_bfactor"] = rho
 
         results[str(cat)] = entry
 
@@ -1146,17 +1421,69 @@ def run_analysis_for_scorer(
         print(f"Pooled rho (Bfactor vs RMSF):      {pooled.pooled_rho_bfactor_rmsf:.3f}")
         print(f"Pooled rho (rob vs Bfactor):       {pooled.pooled_rho_robustness_bfactor:.3f}")
         print(f"Pooled R^2 (Bfactor):               {pooled.pooled_r2_bfactor_rmsf:.3f}")
-        print(f"Pooled R^2 (rob+Bfactor):           {pooled.pooled_r2_joint_bfactor:.3f}")
+        print(f"Pooled R^2 (rob+Bfactor→RMSF):     {pooled.pooled_r2_joint_bfactor:.3f}")
         print(f"Delta R^2 (rob+Bfactor - Bfactor): {pooled.pooled_delta_r2_over_bfactor:.3f}")
 
+    # === B-FACTOR AS TARGET ===
+    if not np.isnan(pooled.pooled_rho_robustness_bfactor_target):
+        print(f"\n{'='*60}")
+        print(f"B-FACTOR AS TARGET (predicting experimental dynamics)")
+        print(f"{'='*60}")
+        print(f"Per-protein median rho (rob vs Bfactor):     "
+              f"{pooled.median_rho_robustness_bfactor_target:.3f}")
+        print(f"Per-protein median rho (pLDDT vs Bfactor):   "
+              f"{pooled.median_rho_plddt_bfactor:.3f}")
+        print(f"Per-protein median rho (SASA vs Bfactor):    "
+              f"{pooled.median_rho_sasa_bfactor:.3f}")
+        print(f"Per-protein median partial (rob|SASA→Bf):    "
+              f"{pooled.median_rho_robustness_bfactor_partial_sasa:.3f}")
+        print(f"Per-protein median partial (rob|pLDDT→Bf):   "
+              f"{pooled.median_rho_robustness_bfactor_partial_plddt:.3f}")
+        print(f"Frac |rho_rob| > |rho_pLDDT| (Bf target):   "
+              f"{pooled.frac_robustness_beats_plddt_bfactor:.3f}")
+        print(f"")
+        print(f"Pooled rho (rob → Bfactor):         {pooled.pooled_rho_robustness_bfactor_target:.3f}")
+        print(f"Pooled R^2 (rob → Bfactor):         {pooled.pooled_r2_robustness_bfactor_target:.3f}")
+        print(f"Pooled rho (pLDDT → Bfactor):       {pooled.pooled_rho_plddt_bfactor:.3f}")
+        print(f"Pooled R^2 (pLDDT → Bfactor):       {pooled.pooled_r2_plddt_bfactor:.3f}")
+        print(f"Pooled rho (SASA → Bfactor):        {pooled.pooled_rho_sasa_bfactor:.3f}")
+        print(f"Pooled R^2 (SASA → Bfactor):        {pooled.pooled_r2_sasa_bfactor:.3f}")
+        print(f"Pooled partial (rob|SASA → Bf):     {pooled.pooled_rho_robustness_bfactor_partial_sasa:.3f}")
+        print(f"Pooled partial (rob|pLDDT → Bf):    {pooled.pooled_rho_robustness_bfactor_partial_plddt:.3f}")
+        print(f"Pooled R^2 (rob+pLDDT → Bfactor):   {pooled.pooled_r2_bfactor_joint_plddt:.3f}")
+        print(f"Delta R^2 over pLDDT (Bf target):    {pooled.pooled_delta_r2_bfactor_over_plddt:.3f}")
+        print(f"Pooled R^2 (rob+SASA → Bfactor):    {pooled.pooled_r2_bfactor_joint_sasa:.3f}")
+        print(f"Delta R^2 over SASA (Bf target):     {pooled.pooled_delta_r2_bfactor_over_sasa:.3f}")
+
     if strat_ss:
-        print(f"\nBy secondary structure:")
+        print(f"\nBy secondary structure (RMSF target):")
         for cat in sorted(strat_ss.keys()):
             d = strat_ss[cat]
             label = {"H": "Helix", "E": "Sheet", "C": "Coil"}.get(cat, cat)
             print(f"  {label:8s}: rho_rob={d.get('rho_robustness_rmsf', float('nan')):.3f}  "
                   f"rho_plddt={d.get('rho_plddt_rmsf', float('nan')):.3f}  "
                   f"n={d.get('n_residues', 0):,}")
+
+        # Check if B-factor stratification data exists
+        has_bf_strat = any("rho_robustness_bfactor" in d for d in strat_ss.values())
+        if has_bf_strat:
+            print(f"\nBy secondary structure (B-factor target):")
+            for cat in sorted(strat_ss.keys()):
+                d = strat_ss[cat]
+                label = {"H": "Helix", "E": "Sheet", "C": "Coil"}.get(cat, cat)
+                print(f"  {label:8s}: rho_rob={d.get('rho_robustness_bfactor', float('nan')):.3f}  "
+                      f"rho_plddt={d.get('rho_plddt_bfactor', float('nan')):.3f}  "
+                      f"n={d.get('n_residues', 0):,}")
+
+    if strat_burial:
+        has_bf_burial = any("rho_robustness_bfactor" in d for d in strat_burial.values())
+        if has_bf_burial:
+            print(f"\nBy burial (B-factor target):")
+            for cat in sorted(strat_burial.keys()):
+                d = strat_burial[cat]
+                print(f"  {cat:10s}: rho_rob={d.get('rho_robustness_bfactor', float('nan')):.3f}  "
+                      f"rho_plddt={d.get('rho_plddt_bfactor', float('nan')):.3f}  "
+                      f"n={d.get('n_residues', 0):,}")
 
     # --- Figures ---
     if make_figures:
