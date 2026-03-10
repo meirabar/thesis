@@ -326,6 +326,9 @@ class PerProteinResult:
     rho_robustness_rmsf_partial_sasa: float = np.nan
     pval_robustness_rmsf_partial_sasa: float = np.nan
 
+    # Partial correlation: robustness vs RMSF, controlling for pLDDT
+    rho_robustness_rmsf_partial_plddt: float = np.nan
+
     # Multiple regression: RMSF ~ robustness + pLDDT
     r2_joint: float = np.nan
     delta_r2_over_plddt: float = np.nan  # r2_joint - r2_plddt
@@ -489,6 +492,15 @@ def correlate_single_protein(
         result.rho_robustness_rmsf_partial_sasa = pr
         result.pval_robustness_rmsf_partial_sasa = pval_pr
 
+    # --- Partial: robustness vs RMSF | pLDDT ---
+    if len(plddt_valid) >= 10:
+        pr, _ = partial_spearman(
+            plddt_valid["mean_abs_ddg"].values,
+            plddt_valid["rmsf_avg"].values,
+            plddt_valid["plddt"].values,
+        )
+        result.rho_robustness_rmsf_partial_plddt = pr
+
     # --- Multiple regression: RMSF ~ robustness + SASA ---
     if len(sasa_valid) >= 10:
         from sklearn.linear_model import LinearRegression
@@ -639,6 +651,7 @@ class PooledResult:
     pooled_rho_sasa_rmsf: float = np.nan
     pooled_r2_sasa_rmsf: float = np.nan
     pooled_rho_robustness_rmsf_partial_sasa: float = np.nan
+    pooled_rho_robustness_rmsf_partial_plddt: float = np.nan
     pooled_r2_joint_sasa: float = np.nan
     pooled_delta_r2_over_sasa: float = np.nan
 
@@ -678,6 +691,7 @@ class PooledResult:
     mean_rho_plddt_rmsf: float = np.nan
     median_rho_sasa_rmsf: float = np.nan
     median_rho_partial_sasa: float = np.nan
+    median_rho_partial_plddt: float = np.nan
     median_rho_bfactor_rmsf: float = np.nan
     median_rho_robustness_bfactor: float = np.nan
 
@@ -714,6 +728,8 @@ def run_pooled_analysis(
                  if not np.isnan(r.rho_sasa_rmsf)]
     rhos_partial = [r.rho_robustness_rmsf_partial_sasa for r in per_protein_results
                     if not np.isnan(r.rho_robustness_rmsf_partial_sasa)]
+    rhos_partial_plddt = [r.rho_robustness_rmsf_partial_plddt for r in per_protein_results
+                          if not np.isnan(r.rho_robustness_rmsf_partial_plddt)]
     rhos_bfactor = [r.rho_bfactor_rmsf for r in per_protein_results
                     if not np.isnan(r.rho_bfactor_rmsf)]
     rhos_rob_bf = [r.rho_robustness_bfactor for r in per_protein_results
@@ -732,6 +748,8 @@ def run_pooled_analysis(
         result.median_rho_sasa_rmsf = float(np.median(rhos_sasa))
     if rhos_partial:
         result.median_rho_partial_sasa = float(np.median(rhos_partial))
+    if rhos_partial_plddt:
+        result.median_rho_partial_plddt = float(np.median(rhos_partial_plddt))
     if rhos_bfactor:
         result.median_rho_bfactor_rmsf = float(np.median(rhos_bfactor))
     if rhos_rob_bf:
@@ -838,7 +856,19 @@ def run_pooled_analysis(
             )
             result.pooled_rho_robustness_rmsf_partial_sasa = pr
 
-            # Pooled regression: RMSF ~ robustness + SASA
+        # Pooled partial correlation: robustness vs RMSF | pLDDT
+        if "plddt_z" in pooled.columns:
+            valid_rp = pooled.dropna(subset=["mean_abs_ddg_z", "rmsf_avg_z", "plddt_z"])
+            if len(valid_rp) >= 20:
+                pr, _ = partial_spearman(
+                    valid_rp["mean_abs_ddg_z"].values,
+                    valid_rp["rmsf_avg_z"].values,
+                    valid_rp["plddt_z"].values,
+                )
+                result.pooled_rho_robustness_rmsf_partial_plddt = pr
+
+        # Pooled regression: RMSF ~ robustness + SASA
+        if len(valid_all) >= 20:
             _, r2_j, dr2 = regression_delta_r2(
                 valid_all[["sasa_z"]].values,
                 valid_all[["mean_abs_ddg_z", "sasa_z"]].values,
@@ -1384,6 +1414,9 @@ def run_analysis_for_scorer(
               f"{pooled.median_rho_robustness_bfactor:.3f}")
     print(f"Per-protein median partial rho (rob|SASA):   "
           f"{pooled.median_rho_partial_sasa:.3f}")
+    if not np.isnan(pooled.median_rho_partial_plddt):
+        print(f"Per-protein median partial rho (rob|pLDDT):  "
+              f"{pooled.median_rho_partial_plddt:.3f}")
     print(f"Frac where |rho_robustness| > |rho_pLDDT|:   "
           f"{pooled.frac_robustness_beats_plddt:.3f}")
 
@@ -1410,6 +1443,8 @@ def run_analysis_for_scorer(
     print(f"Pooled rho (pLDDT vs RMSF):       {pooled.pooled_rho_plddt_rmsf:.3f}")
     print(f"Pooled rho (SASA vs RMSF):        {pooled.pooled_rho_sasa_rmsf:.3f}")
     print(f"Pooled partial rho (rob|SASA):    {pooled.pooled_rho_robustness_rmsf_partial_sasa:.3f}")
+    if not np.isnan(pooled.pooled_rho_robustness_rmsf_partial_plddt):
+        print(f"Pooled partial rho (rob|pLDDT):   {pooled.pooled_rho_robustness_rmsf_partial_plddt:.3f}")
     print(f"Pooled R^2 (robustness):           {pooled.pooled_r2_robustness_rmsf:.3f}")
     print(f"Pooled R^2 (pLDDT):                {pooled.pooled_r2_plddt_rmsf:.3f}")
     print(f"Pooled R^2 (SASA):                 {pooled.pooled_r2_sasa_rmsf:.3f}")
