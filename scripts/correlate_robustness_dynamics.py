@@ -1054,7 +1054,7 @@ def generate_figures(
         print("matplotlib/seaborn not available, skipping figures")
         return
 
-    fig_dir = Path(output_dir) / "figures" / scorer
+    fig_dir = Path(output_dir) / scorer / "figures"
     fig_dir.mkdir(parents=True, exist_ok=True)
 
     # --- Fig A: Distribution of per-protein rho (robustness vs RMSF) ---
@@ -1097,7 +1097,7 @@ def generate_figures(
                 ax.legend()
 
         plt.tight_layout()
-        plt.savefig(fig_dir / "per_protein_correlations.png", dpi=150)
+        plt.savefig(fig_dir / f"{scorer}_per_protein_correlations.png", dpi=150)
         plt.close()
 
     # --- Fig B: Pooled scatter (z-scored) ---
@@ -1132,7 +1132,7 @@ def generate_figures(
         ax.axvline(0, color="gray", linewidth=0.5)
 
         plt.tight_layout()
-        plt.savefig(fig_dir / "pooled_scatter.png", dpi=150)
+        plt.savefig(fig_dir / f"{scorer}_pooled_scatter.png", dpi=150)
         plt.close()
 
     # --- Fig C: Stratified bar chart ---
@@ -1158,7 +1158,7 @@ def generate_figures(
         ax.axhline(0, color="black", linewidth=0.5)
 
         plt.tight_layout()
-        plt.savefig(fig_dir / "stratified_ss.png", dpi=150)
+        plt.savefig(fig_dir / f"{scorer}_stratified_ss.png", dpi=150)
         plt.close()
 
     print(f"Figures saved to {fig_dir}")

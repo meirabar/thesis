@@ -36,7 +36,7 @@ def load_results(results_dir: str):
     return rmsf, bf
 
 
-def plot_coefficients(rmsf, bf, output_dir: str):
+def plot_coefficients(rmsf, bf, output_dir: str, scorer: str = "thermompnn"):
     """Bar plot of 20-AA Ridge coefficients for RMSF vs B-factor."""
     coefs_rmsf = rmsf["ridge_20ddg"]["feature_coefs_mean"]
     coefs_bf = bf["ridge_20ddg"]["feature_coefs_mean"]
@@ -65,17 +65,17 @@ def plot_coefficients(rmsf, bf, output_dir: str):
     ax.grid(axis="y", alpha=0.3)
 
     fig.tight_layout()
-    out_path = Path(output_dir) / "multi_ddg_coefficients.pdf"
+    out_path = Path(output_dir) / f"{scorer}_multi_ddg_coefficients.pdf"
     fig.savefig(str(out_path), dpi=150, bbox_inches="tight")
     print(f"Saved: {out_path}")
 
-    out_png = Path(output_dir) / "multi_ddg_coefficients.png"
+    out_png = Path(output_dir) / f"{scorer}_multi_ddg_coefficients.png"
     fig.savefig(str(out_png), dpi=150, bbox_inches="tight")
     print(f"Saved: {out_png}")
     plt.close(fig)
 
 
-def plot_model_comparison(rmsf, bf, output_dir: str):
+def plot_model_comparison(rmsf, bf, output_dir: str, scorer: str = "thermompnn"):
     """Grouped bar chart comparing R² across models for both targets."""
     model_order = [
         "ols_mean_abs_ddg", "ols_sasa", "ols_plddt", "ols_mean_plddt",
@@ -133,11 +133,11 @@ def plot_model_comparison(rmsf, bf, output_dir: str):
                 arrowprops=dict(arrowstyle="->", color="#DD8452", lw=1.2))
 
     fig.tight_layout()
-    out_path = Path(output_dir) / "multi_ddg_model_comparison.pdf"
+    out_path = Path(output_dir) / f"{scorer}_multi_ddg_model_comparison.pdf"
     fig.savefig(str(out_path), dpi=150, bbox_inches="tight")
     print(f"Saved: {out_path}")
 
-    out_png = Path(output_dir) / "multi_ddg_model_comparison.png"
+    out_png = Path(output_dir) / f"{scorer}_multi_ddg_model_comparison.png"
     fig.savefig(str(out_png), dpi=150, bbox_inches="tight")
     print(f"Saved: {out_png}")
     plt.close(fig)
@@ -149,13 +149,15 @@ def main():
                         help="Directory with multi_ddg_*_results.json files")
     parser.add_argument("--output_dir", type=str, required=True,
                         help="Directory for output figures")
+    parser.add_argument("--scorer", type=str, default="thermompnn",
+                        help="Scorer name for figure filename prefix")
     args = parser.parse_args()
 
     Path(args.output_dir).mkdir(parents=True, exist_ok=True)
 
     rmsf, bf = load_results(args.results_dir)
-    plot_coefficients(rmsf, bf, args.output_dir)
-    plot_model_comparison(rmsf, bf, args.output_dir)
+    plot_coefficients(rmsf, bf, args.output_dir, args.scorer)
+    plot_model_comparison(rmsf, bf, args.output_dir, args.scorer)
     print("\nDone.")
 
 
