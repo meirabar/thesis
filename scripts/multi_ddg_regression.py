@@ -208,7 +208,7 @@ def build_dataset(
         ddg_20, seq = result
         L = len(seq)
 
-        if max_seq_length > 0 and L > max_seq_length:
+        if max_seq_length > 0 and L >= max_seq_length:
             skipped["too_long"] += 1
             continue
 
@@ -298,9 +298,47 @@ def run_cv_regression(
     # Protein indices
     indices = np.arange(n)
 
-    # Model definitions: name -> (feature_extractor, regularized)
+    # --- Helper: compute nonlinear summary features from DDG matrix ---
+    def ddg_nonlinear_features(ddg_20):
+        """Compute nonlinear summary statistics from L x 20 DDG matrix.
+
+        Returns L x 4 array: [std_ddg, mean_abs_ddg, max_abs_ddg, min_ddg].
+        These capture landscape shape properties (variance, extremes) that
+        a linear combination of the 20 raw DDG values cannot represent.
+        """
+        # Mask out the self-mutation (0 values) for correct statistics
+        ddg_masked = ddg_20.copy()
+        ddg_masked[ddg_masked == 0] = np.nan
+        std_ddg = np.nanstd(ddg_masked, axis=1)
+        mean_abs = np.nanmean(np.abs(ddg_masked), axis=1)
+        max_abs = np.nanmax(np.abs(ddg_masked), axis=1)
+        min_ddg = np.nanmin(ddg_masked, axis=1)
+        return np.column_stack([std_ddg, mean_abs, max_abs, min_ddg])
+
+    nonlinear_names = ["std_ddg", "mean|DDG|", "max|DDG|", "min_ddg"]
+
+    # --- Model definitions: name -> (feature_extractor, regularized) ---
     def extract_20ddg(entry):
         return entry["ddg_20"]
+
+    def extract_20ddg_nonlinear(entry):
+        """20 raw DDG + 4 nonlinear summary features = 24 features.
+        This hybrid model can capture both per-AA-specific effects AND
+        landscape shape (variance, extremes) that pure linear models miss.
+        """
+        nl = ddg_nonlinear_features(entry["ddg_20"])
+        return np.column_stack([entry["ddg_20"], nl])
+
+    def extract_20ddg_nonlinear_plddt(entry):
+        """24 DDG features + pLDDT = 25 features."""
+        if entry["plddt"] is None:
+            return None
+        nl = ddg_nonlinear_features(entry["ddg_20"])
+        return np.column_stack([entry["ddg_20"], nl, entry["plddt"]])
+
+    def extract_nonlinear_only(entry):
+        """4 nonlinear DDG summary features only (no per-AA detail)."""
+        return ddg_nonlinear_features(entry["ddg_20"])
 
     def extract_20ddg_plddt(entry):
         if entry["plddt"] is None:
@@ -333,6 +371,24 @@ def run_cv_regression(
             "use_ridge": True,
             "feature_names": list(AA_LIST),
             "n_features": 20,
+        },
+        "ridge_20ddg_nonlinear": {
+            "extractor": extract_20ddg_nonlinear,
+            "use_ridge": True,
+            "feature_names": list(AA_LIST) + nonlinear_names,
+            "n_features": 24,
+        },
+        "ridge_20ddg_nonlinear_plddt": {
+            "extractor": extract_20ddg_nonlinear_plddt,
+            "use_ridge": True,
+            "feature_names": list(AA_LIST) + nonlinear_names + ["pLDDT"],
+            "n_features": 25,
+        },
+        "ridge_nonlinear_only": {
+            "extractor": extract_nonlinear_only,
+            "use_ridge": True,
+            "feature_names": nonlinear_names,
+            "n_features": 4,
         },
         "ridge_20ddg_plddt": {
             "extractor": extract_20ddg_plddt,
@@ -563,7 +619,9 @@ def main():
           f"{'CV rho':>12s} {'PP med rho':>10s}")
     print("-" * 70)
     for name in ["ols_plddt", "ols_mean_abs_ddg", "ols_sasa",
-                  "ols_mean_plddt", "ridge_20ddg", "ridge_20ddg_plddt"]:
+                  "ols_mean_plddt", "ridge_nonlinear_only",
+                  "ridge_20ddg", "ridge_20ddg_plddt",
+                  "ridge_20ddg_nonlinear", "ridge_20ddg_nonlinear_plddt"]:
         if name not in results:
             continue
         r = results[name]

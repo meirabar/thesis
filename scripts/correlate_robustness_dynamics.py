@@ -1189,8 +1189,8 @@ def main():
     parser.add_argument("--max_proteins", type=int, default=0,
                         help="Limit number of proteins (0=all, for testing)")
     parser.add_argument("--max_seq_length", type=int, default=0,
-                        help="Skip proteins longer than this (0=no limit, "
-                             "1024=match ESM-1v limit for fair comparison)")
+                        help="Skip proteins with length >= this (0=no limit, "
+                             "1024=exclude >=1024 to match ESM-1v limit)")
     args = parser.parse_args()
 
     for scorer in args.scorer:
@@ -1261,8 +1261,8 @@ def run_analysis_for_scorer(
             n_skip_no_robustness += 1
             continue
 
-        # Skip proteins exceeding max sequence length (e.g. ESM-1v 1024 limit)
-        if max_seq_length > 0 and len(rob_df) > max_seq_length:
+        # Skip proteins at or exceeding max sequence length (e.g. ESM-1v 1024 limit)
+        if max_seq_length > 0 and len(rob_df) >= max_seq_length:
             n_skip_too_long += 1
             continue
 
@@ -1339,7 +1339,7 @@ def run_analysis_for_scorer(
     print(f"\nProcessed: {len(per_protein_results)} proteins")
     print(f"Skipped: {n_skip_no_robustness} no robustness, "
           f"{n_skip_no_rmsf} no RMSF, {n_skip_too_short} too short, "
-          f"{n_skip_too_long} too long (>{max_seq_length})")
+          f"{n_skip_too_long} too long (>={max_seq_length})")
 
     if not per_protein_results:
         print("No proteins to analyze!")
