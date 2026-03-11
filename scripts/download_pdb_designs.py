@@ -71,13 +71,15 @@ FALSE_POSITIVE_KEYWORDS = [
     "binding of", "recognition of",
 ]
 
-# Keywords indicating structural-genomics targets or natural proteins that are
-# not de novo designs (caught by full-text search incidentally)
+# Keywords indicating structural-genomics targets, natural proteins, or
+# fusion constructs (caught by full-text search incidentally)
 NATURAL_PROTEIN_KEYWORDS = [
     "structural genomics", "northeast structural", "new york sgx",
     "midwest center for structural genomics", "joint center for structural",
     "seattle structural genomics",
     "colicin", "bacteriocin", "immunity protein",
+    "fusion mbp", "fusion with mbp", "mbp fusion",
+    "fusion gfp", "fusion with gfp", "gfp fusion",
 ]
 
 # Positive keywords — if the title contains one of these, it is likely a

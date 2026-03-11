@@ -751,8 +751,33 @@ def process_single_protein(protein_id: str, seq: str, pdb_path: Optional[str],
         print(f"  FAIL {protein_id}: {e}")
         return False
 
+    # The scorer may use the PDB-derived sequence (e.g. when the metadata
+    # canonical sequence differs from the resolved structure).  Reconcile
+    # by reading back the actual sequence the scorer used when the matrix
+    # shape differs from the input sequence.
+    if ddg_matrix.shape[0] != len(seq):
+        # Re-derive the sequence from the PDB to match the DDG matrix.
+        # ThermoMPNN uses its own PDB parser and may see more residues than
+        # the canonical sequence from metadata (e.g. fusion tags, expression
+        # constructs, or minor discrepancies in numbering).
+        try:
+            pdb_seq = extract_sequence_from_pdb(pdb_path, chain_id or "A")
+        except Exception:
+            pdb_seq = ""
+        if len(pdb_seq) == ddg_matrix.shape[0]:
+            seq = pdb_seq
+        else:
+            print(f"  FAIL {protein_id}: DDG matrix ({ddg_matrix.shape[0]}) vs "
+                  f"sequence ({len(seq)}) mismatch, could not reconcile "
+                  f"(PDB seq: {len(pdb_seq)})")
+            return False
+
     # Compute robustness metrics
-    metrics = compute_robustness_metrics(ddg_matrix, seq)
+    try:
+        metrics = compute_robustness_metrics(ddg_matrix, seq)
+    except Exception as e:
+        print(f"  FAIL {protein_id} (metrics): {e}")
+        return False
 
     # Save
     save_results(protein_id, seq, ddg_matrix, metrics, scorer.name, output_dir)
@@ -912,10 +937,14 @@ def main():
         t0 = _time.time()
         print(f"[{idx+1}/{len(proteins_to_process)}] {pid} (L={len(seq)}) ...",
               end=" ", flush=True)
-        success = process_single_protein(
-            pid, seq, pdb_path, scorer, args.output_dir,
-            skip_existing=args.skip_existing, chain_id=prot_chain
-        )
+        try:
+            success = process_single_protein(
+                pid, seq, pdb_path, scorer, args.output_dir,
+                skip_existing=args.skip_existing, chain_id=prot_chain
+            )
+        except Exception as e:
+            print(f"ERROR: {e}", flush=True)
+            success = False
         elapsed = _time.time() - t0
         if success:
             n_ok += 1
