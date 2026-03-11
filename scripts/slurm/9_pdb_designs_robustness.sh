@@ -10,11 +10,11 @@
 # GPU job. Run after 8_pdb_designs_download.sh completes.
 #
 # Usage:
-#   sbatch --array=0-8 scripts/slurm/9_pdb_designs_robustness.sh   # all ~432 proteins
+#   sbatch --array=0-6 scripts/slurm/9_pdb_designs_robustness.sh   # all ~318 proteins
 #   sbatch --array=0   scripts/slurm/9_pdb_designs_robustness.sh   # test (first 50)
 #
 # CHUNK_SIZE is set in config.sh (default 50).
-# 432 proteins / 50 = 9 chunks -> array=0-8
+# ~318 proteins / 50 = 7 chunks -> array=0-6
 # ============================================================================
 
 set -euo pipefail

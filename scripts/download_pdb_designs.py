@@ -56,6 +56,45 @@ MEMBRANE_KEYWORDS = [
     "pore", "ion channel", "gpcr", "porin",
 ]
 
+# Title-based false-positive filtering.
+# The full-text search matches papers where *ligands* or *drugs* were "designed",
+# not the protein itself.  We exclude entries whose title contains a
+# ligand/complex indicator keyword UNLESS the title also contains a genuine
+# protein-design keyword.
+
+# Keywords that suggest the entry is a natural protein with a designed ligand
+FALSE_POSITIVE_KEYWORDS = [
+    "in complex with", "bound to", "bound with", "complexed with",
+    "ligand", "inhibitor", "inhibition", "drug", "compound",
+    "substrate", "agonist", "antagonist", "antibody", "nanobody",
+    "peptide inhibitor", "small molecule", "fragment",
+    "binding of", "recognition of",
+]
+
+# Keywords indicating structural-genomics targets or natural proteins that are
+# not de novo designs (caught by full-text search incidentally)
+NATURAL_PROTEIN_KEYWORDS = [
+    "structural genomics", "northeast structural", "new york sgx",
+    "midwest center for structural genomics", "joint center for structural",
+    "seattle structural genomics",
+    "colicin", "bacteriocin", "immunity protein",
+]
+
+# Positive keywords — if the title contains one of these, it is likely a
+# genuine de novo design even if a false-positive keyword also appears
+DESIGN_POSITIVE_KEYWORDS = [
+    "de novo design", "de novo protein", "de novo fold",
+    "de novo-designed", "designed protein", "designed fold",
+    "designed repeat", "designed helix", "designed helical",
+    "designed beta", "designed bundle", "designed barrel",
+    "designed coiled", "designed mini", "designed scaffold",
+    "computationally designed", "computational design",
+    "computational protein design",
+    "rosetta", "proteinmpnn", "hallucination",
+    "rfdiffusion", "protein design",
+    "top7", "topology design",
+]
+
 # ATLAS-comparable filters
 MAX_RESOLUTION = 2.0    # Angstroms (ATLAS uses <= 2.0)
 MIN_CHAIN_LENGTH = 38   # residues (ATLAS criterion)
@@ -225,6 +264,19 @@ def filter_entry(meta: dict) -> tuple:
     or a string explaining why it was rejected.
     """
     title_lower = meta["title"].lower()
+
+    # False-positive check: title suggests a natural protein + designed ligand
+    has_fp_keyword = any(kw in title_lower for kw in FALSE_POSITIVE_KEYWORDS)
+    has_design_keyword = any(kw in title_lower for kw in DESIGN_POSITIVE_KEYWORDS)
+    if has_fp_keyword and not has_design_keyword:
+        matched = [kw for kw in FALSE_POSITIVE_KEYWORDS if kw in title_lower]
+        return None, None, f"likely false positive (title: '{matched[0]}')"
+
+    # Structural genomics / natural protein check
+    has_natural_keyword = any(kw in title_lower for kw in NATURAL_PROTEIN_KEYWORDS)
+    if has_natural_keyword and not has_design_keyword:
+        matched = [kw for kw in NATURAL_PROTEIN_KEYWORDS if kw in title_lower]
+        return None, None, f"natural protein (title: '{matched[0]}')"
 
     # Membrane protein check
     for kw in MEMBRANE_KEYWORDS:
