@@ -433,6 +433,10 @@ class ThermoMPNNScorer(DDGScorer):
             L = len(seq)
             ddg_full = np.full((L, N_AA), np.nan, dtype=np.float32)
 
+        # Store the sequence that will be used for DDG computation, so
+        # the caller can reconcile any metadata vs. PDB discrepancy.
+        self._last_parsed_seq = seq
+
         # Build all mutation objects
         all_mutations = []
         all_indices = []  # (position_i, aa_j) for tracking
@@ -756,20 +760,15 @@ def process_single_protein(protein_id: str, seq: str, pdb_path: Optional[str],
     # by reading back the actual sequence the scorer used when the matrix
     # shape differs from the input sequence.
     if ddg_matrix.shape[0] != len(seq):
-        # Re-derive the sequence from the PDB to match the DDG matrix.
-        # ThermoMPNN uses its own PDB parser and may see more residues than
-        # the canonical sequence from metadata (e.g. fusion tags, expression
-        # constructs, or minor discrepancies in numbering).
-        try:
-            pdb_seq = extract_sequence_from_pdb(pdb_path, chain_id or "A")
-        except Exception:
-            pdb_seq = ""
-        if len(pdb_seq) == ddg_matrix.shape[0]:
-            seq = pdb_seq
+        # The scorer's PDB parser may include modified residues (e.g. MSE)
+        # that differ from the canonical metadata sequence.  Use the exact
+        # sequence the scorer parsed, stored as scorer._last_parsed_seq.
+        parsed_seq = getattr(scorer, "_last_parsed_seq", None)
+        if parsed_seq is not None and len(parsed_seq) == ddg_matrix.shape[0]:
+            seq = parsed_seq
         else:
             print(f"  FAIL {protein_id}: DDG matrix ({ddg_matrix.shape[0]}) vs "
-                  f"sequence ({len(seq)}) mismatch, could not reconcile "
-                  f"(PDB seq: {len(pdb_seq)})")
+                  f"sequence ({len(seq)}) mismatch, could not reconcile")
             return False
 
     # Compute robustness metrics
