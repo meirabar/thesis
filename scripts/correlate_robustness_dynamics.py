@@ -149,6 +149,54 @@ def load_robustness_global(robustness_dir: str, scorer: str, protein_id: str
 
 
 # ==========================================================================
+# PDB PREPROCESSING
+# ==========================================================================
+
+def _clean_pdb_for_mdtraj(pdb_path: str) -> str:
+    """Write a cleaned PDB to a temp file, suitable for mdtraj/DSSP.
+
+    Raw PDB files can contain alternate conformations (altloc A/B) and
+    modified residues recorded as HETATM.  mdtraj's C extensions crash
+    (calling exit()) when two atoms occupy the same coordinates.
+
+    This function:
+      - Keeps only the first alternate conformation (altloc ' ' or 'A')
+      - Drops duplicate (atom_name, chain, resSeq, iCode) entries
+      - Preserves HETATM records for modified amino acids
+      - Writes the result to a NamedTemporaryFile (caller must delete)
+
+    Returns path to the cleaned temp PDB file.
+    """
+    import tempfile
+    seen = set()
+    cleaned_lines = []
+    for line in open(pdb_path):
+        if line.startswith(("ATOM", "HETATM")):
+            altloc = line[16] if len(line) > 16 else " "
+            if altloc not in (" ", "A"):
+                continue  # skip alternate conformations B, C, ...
+            # Deduplicate by (atom_name, chain, resSeq, iCode)
+            atom_name = line[12:16]
+            chain = line[21]
+            resseq = line[22:27]  # includes iCode at position 26
+            key = (atom_name, chain, resseq)
+            if key in seen:
+                continue
+            seen.add(key)
+            # Clear the altloc field so mdtraj doesn't see it
+            line = line[:16] + " " + line[17:]
+            cleaned_lines.append(line)
+        elif line.startswith(("END", "TER", "MODEL", "ENDMDL",
+                              "CRYST1", "REMARK", "HEADER")):
+            cleaned_lines.append(line)
+
+    tmp = tempfile.NamedTemporaryFile(suffix=".pdb", mode="w", delete=False)
+    tmp.writelines(cleaned_lines)
+    tmp.close()
+    return tmp.name
+
+
+# ==========================================================================
 # SECONDARY STRUCTURE FROM PDB
 # ==========================================================================
 
@@ -156,7 +204,18 @@ def assign_secondary_structure(pdb_path: str) -> Optional[List[str]]:
     """Assign secondary structure using DSSP (BioPython) or mdtraj fallback.
 
     Returns list of 'H' (helix), 'E' (sheet), 'C' (coil) per residue.
+    Uses a cleaned PDB (no alt-confs / duplicate atoms) to avoid C-level
+    crashes in mkdssp and mdtraj.
     """
+    clean_path = _clean_pdb_for_mdtraj(pdb_path)
+    try:
+        return _assign_ss_impl(clean_path)
+    finally:
+        os.unlink(clean_path)
+
+
+def _assign_ss_impl(pdb_path: str) -> Optional[List[str]]:
+    """Inner implementation of SS assignment (operates on a clean PDB)."""
     # Try BioPython DSSP first (requires external mkdssp binary)
     try:
         from Bio.PDB import PDBParser
@@ -200,18 +259,22 @@ def compute_burial(pdb_path: str) -> Optional[List[float]]:
     """Compute per-residue relative solvent accessibility (RSA).
 
     Returns list of RSA values (0=buried, 1=exposed).
+    Uses a cleaned PDB to avoid C-level crashes from overlapping atoms.
     """
+    clean_path = _clean_pdb_for_mdtraj(pdb_path)
     try:
         from Bio.PDB import PDBParser
         from Bio.PDB.DSSP import DSSP
         parser = PDBParser(QUIET=True)
-        structure = parser.get_structure("protein", pdb_path)
+        structure = parser.get_structure("protein", clean_path)
         model = structure[0]
-        dssp = DSSP(model, pdb_path, dssp="mkdssp")
+        dssp = DSSP(model, clean_path, dssp="mkdssp")
         rsa_list = [dssp[key][3] for key in dssp.keys()]
         return rsa_list
     except Exception:
         return None
+    finally:
+        os.unlink(clean_path)
 
 
 def compute_sasa_from_pdb(pdb_path: str) -> Optional[pd.DataFrame]:
@@ -219,12 +282,14 @@ def compute_sasa_from_pdb(pdb_path: str) -> Optional[pd.DataFrame]:
 
     This is independent of DSSP (works even with --no_dssp) and provides
     a uniform burial baseline for all protein types (natural and designed).
+    Uses a cleaned PDB to avoid C-level crashes from overlapping atoms.
 
     Returns DataFrame with columns: position, sasa (in nm^2).
     """
+    clean_path = _clean_pdb_for_mdtraj(pdb_path)
     try:
         import mdtraj
-        traj = mdtraj.load(pdb_path)
+        traj = mdtraj.load(clean_path)
         # Compute per-atom SASA, then sum by residue
         sasa_per_atom = mdtraj.shrake_rupley(traj, mode='atom')  # shape (1, n_atoms)
         sasa_per_residue = np.zeros(traj.topology.n_residues)
@@ -237,6 +302,8 @@ def compute_sasa_from_pdb(pdb_path: str) -> Optional[pd.DataFrame]:
         return result
     except Exception:
         return None
+    finally:
+        os.unlink(clean_path)
 
 
 # ==========================================================================
@@ -1224,6 +1291,9 @@ def main():
                         help="Skip figure generation")
     parser.add_argument("--no_dssp", action="store_true",
                         help="Skip DSSP-based secondary structure assignment")
+    parser.add_argument("--no_sasa", action="store_true",
+                        help="Skip SASA computation (avoids mdtraj crashes "
+                             "on raw PDB files with overlapping atoms)")
     parser.add_argument("--max_proteins", type=int, default=0,
                         help="Limit number of proteins (0=all, for testing)")
     parser.add_argument("--max_seq_length", type=int, default=0,
@@ -1252,6 +1322,7 @@ def main():
             output_dir=args.output_dir,
             make_figures=not args.no_figures,
             use_dssp=not args.no_dssp,
+            compute_sasa=not args.no_sasa,
             max_proteins=args.max_proteins,
             max_seq_length=args.max_seq_length,
             robustness_col=args.robustness_col,
@@ -1266,6 +1337,7 @@ def run_analysis_for_scorer(
     output_dir: str,
     make_figures: bool = True,
     use_dssp: bool = True,
+    compute_sasa: bool = True,
     max_proteins: int = 0,
     max_seq_length: int = 0,
     robustness_col: str = "mean_abs_ddg",
@@ -1343,12 +1415,13 @@ def run_analysis_for_scorer(
 
         # Compute SASA from PDB (uniform burial baseline for all proteins)
         sasa_df = None
-        pdb_files = list(Path(protein_dir).glob("*.pdb"))
-        if pdb_files:
-            try:
-                sasa_df = compute_sasa_from_pdb(str(pdb_files[0]))
-            except Exception as e:
-                print(f"  Warning: SASA computation failed for {pid}: {e}")
+        if compute_sasa:
+            pdb_files = list(Path(protein_dir).glob("*.pdb"))
+            if pdb_files:
+                try:
+                    sasa_df = compute_sasa_from_pdb(str(pdb_files[0]))
+                except Exception as e:
+                    print(f"  Warning: SASA computation failed for {pid}: {e}")
 
         # Correlate
         result = correlate_single_protein(
