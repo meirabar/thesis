@@ -32,6 +32,11 @@ export BBFLOW_PROCESSED="${PROJECT_DIR}/data/bbflow_processed"
 export BBFLOW_ROBUSTNESS="${PROJECT_DIR}/data/bbflow_robustness"
 export BBFLOW_ANALYSIS="${PROJECT_DIR}/data/bbflow_analysis"
 
+# --- PDB de novo designs paths ---
+export PDB_DESIGNS_DIR="${PROJECT_DIR}/data/pdb_designs"
+export PDB_DESIGNS_ROBUSTNESS="${PROJECT_DIR}/data/pdb_designs_robustness"
+export PDB_DESIGNS_ANALYSIS="${PROJECT_DIR}/data/pdb_designs_analysis"
+
 # --- SLURM settings ---
 export GPU_PARTITION="catfish"
 export CPU_PARTITION="glacier"

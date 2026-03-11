@@ -1233,11 +1233,17 @@ def main():
                         help="Column name for the per-residue robustness index "
                              "(default: mean_abs_ddg). Other options: std_ddg, "
                              "max_ddg, frac_destabilizing, frac_neutral")
+    parser.add_argument("--target", type=str, default="rmsf",
+                        choices=["rmsf", "bfactor"],
+                        help="Primary dynamics target column (default: rmsf). "
+                             "Use 'bfactor' for datasets without MD trajectories "
+                             "(e.g. PDB de novo designs with only crystal B-factors).")
     args = parser.parse_args()
 
     for scorer in args.scorer:
         print(f"\n{'='*60}")
-        print(f"ANALYSIS: scorer = {scorer}, robustness_col = {args.robustness_col}")
+        print(f"ANALYSIS: scorer = {scorer}, robustness_col = {args.robustness_col}, "
+              f"target = {args.target}")
         print(f"{'='*60}")
         run_analysis_for_scorer(
             atlas_dir=args.atlas_dir,
@@ -1249,6 +1255,7 @@ def main():
             max_proteins=args.max_proteins,
             max_seq_length=args.max_seq_length,
             robustness_col=args.robustness_col,
+            target=args.target,
         )
 
 
@@ -1262,9 +1269,11 @@ def run_analysis_for_scorer(
     max_proteins: int = 0,
     max_seq_length: int = 0,
     robustness_col: str = "mean_abs_ddg",
+    target: str = "rmsf",
 ):
     """Run the full correlation analysis for one scorer."""
     rob_col = robustness_col  # short alias used throughout
+    bfactor_only = (target == "bfactor")
     out_dir = Path(output_dir) / scorer
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1311,15 +1320,25 @@ def run_analysis_for_scorer(
             n_skip_too_long += 1
             continue
 
-        # Load RMSF
+        # Load RMSF (required unless --target bfactor)
         rmsf_df = load_atlas_rmsf(protein_dir)
-        if rmsf_df is None:
+        if rmsf_df is None and not bfactor_only:
             n_skip_no_rmsf += 1
             continue
 
-        # Load pLDDT and B-factor (optional)
+        # Load pLDDT and B-factor
         plddt_df = load_atlas_pldt(protein_dir)
         bfactor_df = load_atlas_bfactor(protein_dir)
+
+        # In bfactor_only mode, B-factor is required
+        if bfactor_only and bfactor_df is None:
+            n_skip_no_rmsf += 1  # reuse counter
+            continue
+
+        # In bfactor_only mode, synthesize a fake rmsf_df from bfactor
+        # so the downstream code (which keys on "rmsf_avg") works unchanged.
+        if bfactor_only and rmsf_df is None:
+            rmsf_df = bfactor_df.rename(columns={"bfactor": "rmsf_avg"}).copy()
         global_metrics = load_robustness_global(robustness_dir, scorer, pid)
 
         # Compute SASA from PDB (uniform burial baseline for all proteins)
