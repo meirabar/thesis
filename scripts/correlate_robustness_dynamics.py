@@ -1345,7 +1345,10 @@ def run_analysis_for_scorer(
         sasa_df = None
         pdb_files = list(Path(protein_dir).glob("*.pdb"))
         if pdb_files:
-            sasa_df = compute_sasa_from_pdb(str(pdb_files[0]))
+            try:
+                sasa_df = compute_sasa_from_pdb(str(pdb_files[0]))
+            except Exception as e:
+                print(f"  Warning: SASA computation failed for {pid}: {e}")
 
         # Correlate
         result = correlate_single_protein(
@@ -1377,24 +1380,30 @@ def run_analysis_for_scorer(
         if use_dssp:
             pdb_files = list(Path(protein_dir).glob("*.pdb"))
             if pdb_files:
-                ss = assign_secondary_structure(str(pdb_files[0]))
-                if ss and len(ss) == len(merged):
-                    merged["ss"] = ss
-                burial = compute_burial(str(pdb_files[0]))
-                if burial and len(burial) == len(merged):
-                    merged["rsa"] = burial
-                    merged["burial_class"] = pd.cut(
-                        merged["rsa"], bins=[0, 0.2, 0.5, 1.0],
-                        labels=["core", "boundary", "surface"]
-                    )
-                elif "sasa" in merged.columns and merged["sasa"].notna().sum() >= 10:
-                    # Fallback: SASA-based burial (quantile terciles)
-                    terciles = merged["sasa"].quantile([1/3, 2/3])
-                    merged["burial_class"] = pd.cut(
-                        merged["sasa"],
-                        bins=[-np.inf, terciles.iloc[0], terciles.iloc[1], np.inf],
-                        labels=["core", "boundary", "surface"]
-                    )
+                try:
+                    ss = assign_secondary_structure(str(pdb_files[0]))
+                    if ss and len(ss) == len(merged):
+                        merged["ss"] = ss
+                except Exception as e:
+                    print(f"  Warning: SS assignment failed for {pid}: {e}")
+                try:
+                    burial = compute_burial(str(pdb_files[0]))
+                    if burial and len(burial) == len(merged):
+                        merged["rsa"] = burial
+                        merged["burial_class"] = pd.cut(
+                            merged["rsa"], bins=[0, 0.2, 0.5, 1.0],
+                            labels=["core", "boundary", "surface"]
+                        )
+                    elif "sasa" in merged.columns and merged["sasa"].notna().sum() >= 10:
+                        # Fallback: SASA-based burial (quantile terciles)
+                        terciles = merged["sasa"].quantile([1/3, 2/3])
+                        merged["burial_class"] = pd.cut(
+                            merged["sasa"],
+                            bins=[-np.inf, terciles.iloc[0], terciles.iloc[1], np.inf],
+                            labels=["core", "boundary", "surface"]
+                        )
+                except Exception as e:
+                    print(f"  Warning: Burial assignment failed for {pid}: {e}")
 
         per_protein_data.append((merged, pid))
 
