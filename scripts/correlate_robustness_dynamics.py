@@ -1455,8 +1455,28 @@ def run_analysis_for_scorer(
             if pdb_files:
                 try:
                     ss = assign_secondary_structure(str(pdb_files[0]))
-                    if ss and len(ss) == len(merged):
-                        merged["ss"] = ss
+                    if ss:
+                        n_merged = len(merged)
+                        n_ss = len(ss)
+                        if n_ss == n_merged:
+                            merged["ss"] = ss
+                        elif n_ss > n_merged:
+                            # DSSP sees more residues (e.g. HETATM
+                            # modified residues); truncate to match.
+                            merged["ss"] = ss[:n_merged]
+                        else:
+                            # DSSP sees fewer residues; assign what we
+                            # can, leave the rest as NaN (excluded from
+                            # stratification).
+                            merged["ss"] = pd.Series(
+                                ss + [None] * (n_merged - n_ss),
+                                index=merged.index,
+                            )
+                    elif idx == 0:
+                        # Log once if SS assignment returned None
+                        print(f"  Note: SS assignment returned None for "
+                              f"first protein {pid} (mkdssp may not be "
+                              f"installed)")
                 except Exception as e:
                     print(f"  Warning: SS assignment failed for {pid}: {e}")
                 try:
