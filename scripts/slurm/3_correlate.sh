@@ -32,8 +32,8 @@ for ((i=0; i<${#ARGS[@]}; i++)); do
     case "${ARGS[i]}" in
         --both)             SCORERS="esm1v thermompnn" ;;
         --no-dssp)          EXTRA_FLAGS="${EXTRA_FLAGS} --no_dssp" ;;
-        --max-seq-length)   MAX_SEQ_LEN="${ARGS[i+1]}"; ((i++)) ;;
-        --robustness-col)   ROB_COL="${ARGS[i+1]}"; ((i++)) ;;
+        --max-seq-length)   MAX_SEQ_LEN="${ARGS[i+1]}"; ((++i)) ;;
+        --robustness-col)   ROB_COL="${ARGS[i+1]}"; ((++i)) ;;
     esac
 done
 [[ -n "${MAX_SEQ_LEN}" ]] && EXTRA_FLAGS="${EXTRA_FLAGS} --max_seq_length ${MAX_SEQ_LEN}"

@@ -26,7 +26,7 @@ ROB_COL=""
 ARGS=("$@")
 for ((i=0; i<${#ARGS[@]}; i++)); do
     case "${ARGS[i]}" in
-        --robustness-col)   ROB_COL="${ARGS[i+1]}"; ((i++)) ;;
+        --robustness-col)   ROB_COL="${ARGS[i+1]}"; ((++i)) ;;
     esac
 done
 [[ -n "${ROB_COL}" ]] && EXTRA_FLAGS="${EXTRA_FLAGS} --robustness_col ${ROB_COL}"
