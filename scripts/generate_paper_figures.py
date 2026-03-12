@@ -25,7 +25,7 @@ from matplotlib.gridspec import GridSpec
 from scipy import stats as scipy_stats
 
 from paper_config import (
-    DATASETS, CORRELATION_RUNS, TABLE1_COLUMNS,
+    DATASETS, TABLE1_COLUMNS,
     FIG1_PANELS, FIG2_PANELS, FIG3_PANELS, FIG4_PANELS,
 )
 
@@ -140,16 +140,19 @@ def generate_fig1(results: dict, output_dir: Path):
                 continue
 
             # Determine the rho column name
-            rho_col = f"rho_std_ddg_{target}"
-            if rho_col not in pp.columns:
-                rho_col = "rho_std_ddg_rmsf" if target == "rmsf" else "rho_std_ddg_bfactor"
-            if rho_col not in pp.columns:
-                # Try generic
+            # For RMSF target: rho_std_ddg_rmsf; for bfactor target: rho_robustness_bfactor_target
+            rho_candidates = [
+                f"rho_std_ddg_{target}",
+                "rho_robustness_bfactor_target" if target == "bfactor" else "rho_std_ddg_rmsf",
+            ]
+            rho_col = next((c for c in rho_candidates if c in pp.columns), None)
+            if rho_col is None:
+                # Fallback: any column with "rho" and either "std_ddg" or "robustness"
                 for c in pp.columns:
-                    if "rho" in c and "std_ddg" in c:
+                    if "rho" in c and ("std_ddg" in c or "robustness_bfactor" in c):
                         rho_col = c
                         break
-            if rho_col not in pp.columns:
+            if rho_col is None or rho_col not in pp.columns:
                 continue
 
             vals = pp[rho_col].dropna()
@@ -167,11 +170,16 @@ def generate_fig1(results: dict, output_dir: Path):
                     ax_hist.hist(vals, bins=30, alpha=0.5, color="tab:orange", label="pLDDT")
 
                     # Scatter: robustness rho vs pLDDT rho
-                    rob_col = None
-                    for c in pp_th.columns:
-                        if "rho" in c and "std_ddg" in c:
-                            rob_col = c
-                            break
+                    rob_candidates = [
+                        f"rho_std_ddg_{target}",
+                        "rho_robustness_bfactor_target" if target == "bfactor" else "rho_std_ddg_rmsf",
+                    ]
+                    rob_col = next((c for c in rob_candidates if c in pp_th.columns), None)
+                    if rob_col is None:
+                        for c in pp_th.columns:
+                            if "rho" in c and ("std_ddg" in c or "robustness_bfactor" in c):
+                                rob_col = c
+                                break
                     if rob_col:
                         both = pp_th[[rob_col, plddt_col]].dropna()
                         ax_scat.scatter(both[rob_col], both[plddt_col],

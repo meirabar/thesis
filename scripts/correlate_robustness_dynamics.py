@@ -781,6 +781,7 @@ def run_pooled_analysis(
     per_protein_results: List[PerProteinResult],
     scorer: str,
     rob_col: str = "mean_abs_ddg",
+    transform: str = "none",
 ) -> PooledResult:
     """Run pooled analysis across all proteins.
 
@@ -860,6 +861,12 @@ def run_pooled_analysis(
         df = merged_df.dropna(subset=[rob_col, "rmsf_avg"]).copy()
         if len(df) < 10:
             continue
+        # Optionally log-transform response variables before z-scoring
+        # (reduces heavy-tail effects for OLS R²; does not affect Spearman)
+        if transform == "log1p":
+            for resp_col in ["rmsf_avg", "bfactor"]:
+                if resp_col in df.columns:
+                    df[resp_col] = np.log1p(np.clip(df[resp_col].values, 0, None))
         # Z-score within protein to remove protein-level differences
         for col in [rob_col, "rmsf_avg", "plddt", "sasa", "bfactor"]:
             if col in df.columns:
@@ -1166,11 +1173,20 @@ def generate_figures(
     rob_suffix = f"_{rob_col}" if rob_col != "mean_abs_ddg" else ""
     prefix = f"{dataset_name}_{scorer}{rob_suffix}" if dataset_name else f"{scorer}{rob_suffix}"
 
-    # --- Fig A: Distribution of per-protein rho (robustness vs RMSF) ---
+    # --- Fig A: Distribution of per-protein rho (robustness vs target) ---
+    # Use B-factor-as-target fields if RMSF fields are all NaN
     rhos_rob = [r.rho_robustness_rmsf for r in per_protein_results
                 if not np.isnan(r.rho_robustness_rmsf)]
     rhos_plddt = [r.rho_plddt_rmsf for r in per_protein_results
                   if not np.isnan(r.rho_plddt_rmsf)]
+    target_label = "RMSF"
+    if not rhos_rob:
+        # Fall back to B-factor target fields
+        rhos_rob = [r.rho_robustness_bfactor_target for r in per_protein_results
+                    if not np.isnan(r.rho_robustness_bfactor_target)]
+        rhos_plddt = [r.rho_plddt_bfactor for r in per_protein_results
+                      if not np.isnan(r.rho_plddt_bfactor)]
+        target_label = "B-factor"
 
     if rhos_rob:
         fig, axes = plt.subplots(1, 2, figsize=(12, 5))
@@ -1183,7 +1199,7 @@ def generate_figures(
             ax.hist(rhos_plddt, bins=40, alpha=0.5, label="pLDDT",
                     color="coral", edgecolor="black", linewidth=0.5)
         ax.axvline(0, color="black", linestyle="--", linewidth=0.8)
-        ax.set_xlabel("Spearman rho (predictor vs. RMSF)")
+        ax.set_xlabel(f"Spearman rho (predictor vs. {target_label})")
         ax.set_ylabel("Number of proteins")
         ax.set_title("Per-protein correlation with dynamics")
         ax.legend()
@@ -1191,17 +1207,23 @@ def generate_figures(
         # Scatter: rho_robustness vs rho_plddt
         ax = axes[1]
         if rhos_plddt:
-            both = [(r.rho_robustness_rmsf, r.rho_plddt_rmsf)
-                    for r in per_protein_results
-                    if not np.isnan(r.rho_robustness_rmsf)
-                    and not np.isnan(r.rho_plddt_rmsf)]
+            if target_label == "B-factor":
+                both = [(r.rho_robustness_bfactor_target, r.rho_plddt_bfactor)
+                        for r in per_protein_results
+                        if not np.isnan(r.rho_robustness_bfactor_target)
+                        and not np.isnan(r.rho_plddt_bfactor)]
+            else:
+                both = [(r.rho_robustness_rmsf, r.rho_plddt_rmsf)
+                        for r in per_protein_results
+                        if not np.isnan(r.rho_robustness_rmsf)
+                        and not np.isnan(r.rho_plddt_rmsf)]
             if both:
                 x, y = zip(*both)
                 ax.scatter(x, y, alpha=0.3, s=15, color="steelblue")
                 lim = max(abs(min(min(x), min(y))), abs(max(max(x), max(y)))) + 0.1
                 ax.plot([-lim, lim], [-lim, lim], "k--", linewidth=0.8, label="y=x")
-                ax.set_xlabel(f"rho (robustness vs RMSF)")
-                ax.set_ylabel("rho (pLDDT vs RMSF)")
+                ax.set_xlabel(f"rho (robustness vs {target_label})")
+                ax.set_ylabel(f"rho (pLDDT vs {target_label})")
                 ax.set_title("Robustness vs pLDDT as dynamics predictors")
                 ax.legend()
 
@@ -1313,6 +1335,13 @@ def main():
                         help="Primary dynamics target column (default: rmsf). "
                              "Use 'bfactor' for datasets without MD trajectories "
                              "(e.g. PDB de novo designs with only crystal B-factors).")
+    parser.add_argument("--transform", type=str, default="none",
+                        choices=["none", "log1p"],
+                        help="Optional transform applied to the response variable "
+                             "(RMSF or B-factor) before z-scoring for pooled OLS R². "
+                             "'log1p' applies log(1+x) to reduce heavy-tail effects. "
+                             "Does not affect Spearman correlations (rank-invariant). "
+                             "(default: none)")
     args = parser.parse_args()
 
     for scorer in args.scorer:
@@ -1332,6 +1361,7 @@ def main():
             max_seq_length=args.max_seq_length,
             robustness_col=args.robustness_col,
             target=args.target,
+            transform=args.transform,
         )
 
 
@@ -1347,6 +1377,7 @@ def run_analysis_for_scorer(
     max_seq_length: int = 0,
     robustness_col: str = "mean_abs_ddg",
     target: str = "rmsf",
+    transform: str = "none",
 ):
     """Run the full correlation analysis for one scorer."""
     rob_col = robustness_col  # short alias used throughout
@@ -1529,7 +1560,7 @@ def run_analysis_for_scorer(
 
     # --- Pooled analysis ---
     pooled = run_pooled_analysis(per_protein_data, per_protein_results, scorer,
-                                 rob_col=rob_col)
+                                 rob_col=rob_col, transform=transform)
     pooled_fname = f"pooled_results{rob_suffix}.json"
     with open(out_dir / pooled_fname, "w") as f:
         json.dump(asdict(pooled), f, indent=2, default=_json_default)
