@@ -1,0 +1,123 @@
+================================================================================
+DRAFT ISSUES — robustness_dynamics_draft.tex
+Tracked from conversation 2026-03-12
+================================================================================
+
+# 1. Redundant bar-plot figures (Figs 3, 6)
+   Status: IMPLEMENTED — moved to appendix in LaTeX
+   Description: Figs 3 (ATLAS stratified SS) and 6 (PDB designs stratified SS)
+   are bar plots that duplicate info already in tables. Move to appendix.
+
+# 2. Fig 4 right half broken
+   Status: FIXED — bug in generate_paper_figures.py
+   Description: PDB designs per-protein correlations figure
+   (pdb_designs_thermompnn_per_protein_correlations.png), right scatter panel
+   was broken. Root cause: column lookup searched for "std_ddg" but B-factor
+   target uses "rho_robustness_bfactor_target". Fixed in generate_paper_figures.py
+   (both histogram and scatter column lookups).
+
+# 3. New multi-panel Fig 1
+   Status: IMPLEMENTED — generate_paper_figures.py generate_fig1()
+   Description: Create one large 4-panel figure showing per-protein
+   correlation distributions (histogram + scatter) for:
+     (a) ATLAS RMSF, (b) BBFlow RMSF, (c) ATLAS B-factor, (d) PDB-design B-factor
+   Each panel should show ThermoMPNN, pLDDT, AND ESM-1v (currently only
+   ThermoMPNN + pLDDT). This becomes the main results Figure 1.
+
+# 4. Restructure Table 1 (main results)
+   Status: IMPLEMENTED
+   Description: Add PDB-design B-factor as 4th column. Treat pLDDT as
+   a predictor row alongside ESM-1v and ThermoMPNN (not a separate block).
+   Old Table 3 (pdb_designs) merged into Table 1.
+
+# 5. Unite Tables 4+5 → new Table 3 ("Alternative Predictors")
+   Status: IMPLEMENTED
+   Description: First half: alternative scalar robustness measures
+   (std, max, mean|DDG|, etc.). Second half: multi-DDG Ridge regression.
+   Theme = "what's the best way to summarize the DDG profile?"
+
+# 6. Combine Figs 7+9 and 8+10
+   Status: IMPLEMENTED (references combined in LaTeX)
+   Description: Figs 7 (ATLAS model comparison) and 9 (BBFlow model comparison)
+   should be panels of one figure. Same for Figs 8 (ATLAS DDG coefficients)
+   and 10 (BBFlow DDG coefficients). Actual figure regeneration still needed.
+   May also move to appendix.
+
+# 7. Unite Figs 2+5 as 2D density plots
+   Status: IMPLEMENTED — generate_paper_figures.py generate_fig2()
+   Description: Combine ATLAS pooled scatter (Fig 2) and PDB designs pooled
+   scatter (Fig 5) into one figure with multiple panels. Use 2D density
+   (contours/colors) instead of scattered points. Shorten y-axis (heavy tail).
+   Add B-factor panels too (4 panels total: ATLAS RMSF, BBFlow RMSF,
+   ATLAS B-fac, PDB B-fac).
+
+# 8. Marginal distributions on scatter plots
+   Status: IMPLEMENTED — included in generate_fig2() via GridSpec marginal axes
+   Description: On the density scatter figure (item 7), show marginal
+   distributions of RMSF and std(DDG) on the axes. Similar panels for
+   B-factor target.
+
+# 9. GLM for heavy-tailed response
+   Status: PARTIALLY IMPLEMENTED — --transform log1p option added
+   Description: The linear regression R² may be limited by heavy-tailed
+   RMSF/B-factor distributions. Consider:
+   - Check marginals from item 8 to confirm heavy tail
+   - Apply nonlinear transformation (log? Box-Cox?) to response
+   - Fit GLM (e.g., Gamma family with log link) instead of OLS
+   - Preserves coefficient interpretability (unlike RF/NN)
+   - Could substantially improve R² if heavy tail is the bottleneck
+   Note: this is an analysis change, not just a figure/table change.
+
+# 10. Expand stratification table (Table 2)
+   Status: IMPLEMENTED (with TODOs for missing numbers)
+   Description: Table 2 should cover all combinations:
+   Targets: RMSF, B-factor
+   Datasets: ATLAS, BBFlow, PDB-design
+   Strata: SS (H/E/C), Burial (Core/Boundary/Surface)
+   ATLAS B-factor stratified values missing — need to extract from
+   cluster JSON output (stratified_results.json).
+
+# 11. This file
+   Status: DONE
+
+# 12. R² vs rho² discrepancy in Table 5
+   Status: EXPLAINED (see below)
+   Description: User noticed that for 20-DDG Ridge model, med rho ≈ 0.6
+   but CV R² ≈ 0.1, whereas rho² ≈ 0.36. Three factors explain this:
+   (a) Per-protein median rho vs pooled CV R²: different aggregation.
+       Per-protein rho evaluates ranking within each protein independently;
+       pooled CV R² measures variance explained across ALL test residues.
+       Between-protein heterogeneity in the DDG→RMSF relationship hurts
+       pooled R² but does not affect per-protein rho.
+   (b) Cross-validation: protein-level CV holds out entire proteins.
+       With 20 features, generalization error is significant.
+       Compare OLS std(DDG) (1 feature): R²=0.194 vs Ridge 20-DDG: R²=0.105
+       — same per-protein rho (~0.59) but very different R² due to
+       model complexity under CV.
+   (c) Spearman rho ≠ sqrt(R²): rho is rank correlation (monotonic),
+       R² is linear variance explained. For nonlinear relationships,
+       rho > sqrt(R²).
+   Note: the "CV rho" column in ANALYSIS_STATUS.txt (0.419 for 20-DDG)
+   is much closer to sqrt(R²)=0.324, confirming the main gap is
+   per-protein vs pooled, not rho-vs-R² discrepancy.
+
+# 13. Pipeline refactoring for automated paper generation
+   Status: IMPLEMENTED
+   Description: Created modular pipeline so that with one command on
+   cluster all analyses run, and with another command all figures + LaTeX
+   tables are auto-generated. New files:
+   - scripts/paper_config.py — single source of truth for all analyses
+   - scripts/run_all_analyses.py — master orchestrator (SLURM submission)
+   - scripts/collect_results.py — gathers all JSONs into unified_results.json
+   - scripts/generate_latex_tables.py — auto-generates Tables 1, 2, 3
+   - scripts/generate_paper_figures.py — auto-generates Figures 1-4
+   - scripts/slurm/run_full_pipeline.sh — master SLURM entry point
+
+   Workflow:
+   Step 1 (cluster): bash scripts/slurm/run_full_pipeline.sh
+     → submits SLURM jobs for all missing analyses
+   Step 2 (cluster): python scripts/run_all_analyses.py --postprocess-only
+     → collects results, generates tables/ and figures/
+   Step 3: \input{tables/table1.tex} in the LaTeX paper
+
+================================================================================

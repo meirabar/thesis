@@ -245,6 +245,7 @@ def collect_multi_ddg_run(run) -> dict:
             "cv_rho_mean": _nan_safe(model_data.get("cv_rho_mean")),
             "cv_rho_std": _nan_safe(model_data.get("cv_rho_std")),
             "per_protein_rho_median": _nan_safe(model_data.get("per_protein_rho_median")),
+            "feature_names": model_data.get("feature_names"),
             "feature_coefs_mean": model_data.get("feature_coefs_mean"),
         }
 

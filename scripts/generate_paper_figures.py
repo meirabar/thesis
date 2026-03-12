@@ -400,8 +400,16 @@ def generate_fig4(results: dict, output_dir: Path):
             if not coefs:
                 continue
 
-            # Map to amino acids
-            vals = [coefs.get(aa, 0) for aa in AA_ORDER]
+            # Map to amino acids — coefs may be a list (with feature_names) or a dict
+            feat_names = ridge.get("feature_names")
+            if isinstance(coefs, list) and feat_names:
+                coef_dict = dict(zip(feat_names, coefs))
+            elif isinstance(coefs, dict):
+                coef_dict = coefs
+            else:
+                # Assume list is in AA_ORDER if no names
+                coef_dict = dict(zip(AA_ORDER, coefs)) if len(coefs) == 20 else {}
+            vals = [coef_dict.get(aa, 0) for aa in AA_ORDER]
             x = np.arange(len(AA_ORDER))
             width = 0.35
             offset = -width/2 if color == "tab:blue" else width/2
