@@ -189,39 +189,47 @@ def collect_correlation_run(run) -> dict:
 
     # --- Alternative robustness measures (from per-protein data) ---
     # These are median per-protein rho for different robustness summaries.
-    # Stored in per_protein_correlations.tsv columns.
-    # We extract them from pooled_raw which has alt measure medians.
+    # Always read from per-protein TSV (most reliable source).
     alt = {}
-    if is_bfactor_target and not is_bfactor_only:
-        alt["std_ddg"] = _get("median_rho_robustness_bfactor_target")
-        # The alt measure fields for B-factor target may not be in pooled JSON.
-        # They'd need to be computed from per-protein TSV.
-    elif is_bfactor_only:
-        alt["std_ddg"] = _get("median_rho_robustness_rmsf")
-    else:
-        alt["std_ddg"] = _get("median_rho_robustness_rmsf")
-    # Additional alt measures come from per-protein TSV (max_ddg, frac_destab etc.)
-    # We read those from the TSV if it exists
     tsv_path = Path(run.per_protein_tsv_path)
     if tsv_path.exists():
         try:
             import pandas as pd
             pp_df = pd.read_csv(tsv_path, sep="\t")
-            target_suffix = "bfactor" if (is_bfactor_target or is_bfactor_only) else "rmsf"
+            # For bfactor_only datasets, rho columns use _rmsf suffix (aliased)
+            # For ATLAS bfactor target, columns use _bfactor suffix if available
+            target_suffix = "rmsf" if is_bfactor_only else ("bfactor" if is_bfactor_target else "rmsf")
             for col_prefix, label in [
                 ("rho_frac_destab", "frac_destab"),
                 ("rho_frac_neutral", "frac_neutral"),
                 ("rho_std_ddg", "std_ddg"),
                 ("rho_max_ddg", "max_ddg"),
+                ("rho_mean_abs_ddg", "mean_abs_ddg"),
             ]:
-                col = f"{col_prefix}_{target_suffix}" if f"{col_prefix}_{target_suffix}" in pp_df.columns else col_prefix
+                # Try target-specific column first, then fallback
+                col = f"{col_prefix}_{target_suffix}"
+                if col not in pp_df.columns:
+                    col = f"{col_prefix}_rmsf"  # fallback for aliased datasets
+                if col not in pp_df.columns:
+                    col = col_prefix  # bare column name
                 if col in pp_df.columns:
                     vals = pp_df[col].dropna()
                     if len(vals) > 0:
                         alt[label] = _nan_safe(float(vals.median()))
         except Exception:
             pass
+    else:
+        # Fallback to pooled_raw if TSV doesn't exist
+        if is_bfactor_target and not is_bfactor_only:
+            alt["std_ddg"] = _get("median_rho_robustness_bfactor_target")
+        else:
+            alt["std_ddg"] = _get("median_rho_robustness_rmsf")
     result["alt_robustness_medians"] = alt
+
+    # Override per-protein median_rho_robustness with std_ddg value from TSV
+    # when available (paper primary metric is std_ddg, not mean_abs_ddg)
+    if alt.get("std_ddg") is not None:
+        per_prot["median_rho_robustness"] = alt["std_ddg"]
 
     # Protein/residue counts from pooled data
     result["n_proteins"] = _get("n_proteins", run.ds.n_proteins_approx)

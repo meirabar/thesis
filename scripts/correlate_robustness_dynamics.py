@@ -1326,7 +1326,7 @@ def main():
     parser.add_argument("--max_seq_length", type=int, default=0,
                         help="Skip proteins with length >= this (0=no limit, "
                              "1024=exclude >=1024 to match ESM-1v limit)")
-    parser.add_argument("--robustness_col", type=str, default="mean_abs_ddg",
+    parser.add_argument("--robustness_col", type=str, default="std_ddg",
                         help="Column name for the per-residue robustness index "
                              "(default: mean_abs_ddg). Other options: std_ddg, "
                              "max_ddg, frac_destabilizing, frac_neutral")
@@ -1375,7 +1375,7 @@ def run_analysis_for_scorer(
     compute_sasa: bool = True,
     max_proteins: int = 0,
     max_seq_length: int = 0,
-    robustness_col: str = "mean_abs_ddg",
+    robustness_col: str = "std_ddg",
     target: str = "rmsf",
     transform: str = "none",
 ):

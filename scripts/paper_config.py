@@ -85,10 +85,10 @@ DATASETS = {
         analysis_dir=f"{CLUSTER.project_dir}/data/pdb_designs_analysis",
         dataset_type="designed",
         available_targets=["bfactor"],
-        available_scorers=["thermompnn"],  # ESM-1v not run for PDB designs
+        available_scorers=["esm1v", "thermompnn"],
         n_proteins_approx=317,
         bfactor_only=True,
-        has_plddt=False,
+        has_plddt=True,  # pLDDT from ESMFold predictions
     ),
 }
 
@@ -201,11 +201,16 @@ FIG1_PANELS = TABLE1_COLUMNS  # same 4 dataset-target combos
 # Figure 2: 4-panel 2D density scatter with marginals
 FIG2_PANELS = TABLE1_COLUMNS
 
-# Figure 3: Multi-DDG model comparison (2 panels: ATLAS, BBFlow)
-FIG3_PANELS = [("atlas", "rmsf"), ("bbflow", "rmsf")]
+# Figure 3: Multi-DDG model comparison (all dataset-target combos)
+FIG3_PANELS = TABLE1_COLUMNS  # same 4 dataset-target combos
 
-# Figure 4: DDG coefficients (2 panels: ATLAS RMSF vs B-fac, ATLAS vs BBFlow)
-FIG4_PANELS = [("atlas", "rmsf"), ("atlas", "bfactor")]
+# Figure 4: DDG coefficients (3 panels: ATLAS RMSF vs B-fac, ATLAS vs BBFlow, PDB designs)
+FIG4_PANELS = [
+    ("atlas", "rmsf"),
+    ("atlas", "bfactor"),
+    ("bbflow", "rmsf"),
+    ("pdb_designs", "bfactor"),
+]
 
 
 # ============================================================================

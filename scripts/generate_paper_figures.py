@@ -190,6 +190,15 @@ def generate_fig1(results: dict, output_dir: Path):
                         ax_scat.set_ylim(lim)
                         ax_scat.set_xlabel(r"$\rho$(rob, target)")
                         ax_scat.set_ylabel(r"$\rho$(pLDDT, target)")
+        else:
+            # No pLDDT available (e.g., PDB designs)
+            ax_scat.text(0.5, 0.5, "No pLDDT\navailable",
+                         transform=ax_scat.transAxes,
+                         ha="center", va="center", fontsize=11, color="gray")
+            ax_scat.set_xlim([-1, 1])
+            ax_scat.set_ylim([-1, 1])
+            ax_scat.set_xlabel(r"$\rho$(rob, target)")
+            ax_scat.set_ylabel(r"$\rho$(pLDDT, target)")
 
         ax_hist.set_title(panel_label, fontsize=12, fontweight="bold")
         ax_hist.set_xlabel(r"Per-protein Spearman $\rho$")
@@ -297,8 +306,12 @@ def generate_fig2(results: dict, output_dir: Path):
 # ============================================================================
 
 def generate_fig3(results: dict, output_dir: Path):
-    """Combined model comparison bar chart (ATLAS + BBFlow panels)."""
-    fig, axes = plt.subplots(1, 2, figsize=(16, 6), sharey=True)
+    """Model comparison bar chart across all dataset-target combos."""
+    n_panels = len(FIG3_PANELS)
+    ncols = min(n_panels, 4)
+    nrows = (n_panels + ncols - 1) // ncols
+    fig, axes = plt.subplots(nrows, ncols, figsize=(7 * ncols, 6 * nrows),
+                              sharey=True, squeeze=False)
 
     model_display = {
         "ols_mean_abs_ddg": "mean|DDG|",
@@ -313,7 +326,8 @@ def generate_fig3(results: dict, output_dir: Path):
     }
 
     for panel_idx, (ds_name, target) in enumerate(FIG3_PANELS):
-        ax = axes[panel_idx]
+        row, col = divmod(panel_idx, ncols)
+        ax = axes[row, col]
         ds = DATASETS[ds_name]
         target_label = "RMSF" if target == "rmsf" else "B-factor"
 
@@ -323,46 +337,36 @@ def generate_fig3(results: dict, output_dir: Path):
         models = multi.get("models", {})
 
         if not models:
-            ax.set_title(f"{ds.display_name} {target_label} (no data)")
+            ax.set_title(f"{ds.display_name} {target_label}\n(no data)")
+            ax.text(0.5, 0.5, "No multi-DDG data", transform=ax.transAxes,
+                    ha="center", va="center", fontsize=12, color="gray")
             continue
-
-        # Also get B-factor for ATLAS panel
-        bfac_models = {}
-        if ds_name == "atlas" and target == "rmsf":
-            bfac_run = results.get("runs", {}).get("atlas_thermompnn_bfactor", {})
-            bfac_models = bfac_run.get("multi_ddg", {}).get("models", {})
 
         names = []
         r2_vals = []
         r2_stds = []
-        r2_bfac = []
-        r2_bfac_stds = []
 
         for mname in model_display:
             if mname in models:
                 names.append(model_display[mname])
                 r2_vals.append(models[mname].get("cv_r2_mean", 0) or 0)
                 r2_stds.append(models[mname].get("cv_r2_std", 0) or 0)
-                if bfac_models and mname in bfac_models:
-                    r2_bfac.append(bfac_models[mname].get("cv_r2_mean", 0) or 0)
-                    r2_bfac_stds.append(bfac_models[mname].get("cv_r2_std", 0) or 0)
 
         x = np.arange(len(names))
-        width = 0.35 if bfac_models else 0.6
-
-        bars1 = ax.bar(x - (width/2 if bfac_models else 0), r2_vals,
-                        width, yerr=r2_stds, label=target_label,
-                        color="tab:blue", alpha=0.8, capsize=3)
-        if bfac_models:
-            bars2 = ax.bar(x + width/2, r2_bfac, width,
-                            yerr=r2_bfac_stds, label="B-factor",
-                            color="tab:orange", alpha=0.8, capsize=3)
+        ax.bar(x, r2_vals, 0.6, yerr=r2_stds, label=target_label,
+               color="tab:blue" if target == "rmsf" else "tab:orange",
+               alpha=0.8, capsize=3)
 
         ax.set_xticks(x)
         ax.set_xticklabels(names, rotation=45, ha="right", fontsize=9)
         ax.set_ylabel("CV $R^2$")
-        ax.set_title(f"{ds.display_name}", fontsize=12, fontweight="bold")
-        ax.legend()
+        ax.set_title(f"{ds.display_name} {target_label}",
+                     fontsize=12, fontweight="bold")
+
+    # Hide unused axes
+    for idx in range(n_panels, nrows * ncols):
+        row, col = divmod(idx, ncols)
+        axes[row, col].set_visible(False)
 
     plt.tight_layout()
     for ext in ["pdf", "png"]:
@@ -377,21 +381,28 @@ def generate_fig3(results: dict, output_dir: Path):
 # ============================================================================
 
 def generate_fig4(results: dict, output_dir: Path):
-    """Combined per-amino-acid coefficient bar chart."""
+    """Per-amino-acid coefficient bar chart: RMSF panel and B-factor panel."""
     fig, axes = plt.subplots(1, 2, figsize=(16, 6))
 
     AA_ORDER = list("ACDEFGHIKLMNPQRSTVWY")
 
+    # Panel 1: RMSF — ATLAS (blue) + BBFlow (orange)
+    # Panel 2: B-factor — ATLAS (blue) + PDB designs (orange)
     panels = [
-        ("ATLAS: RMSF vs B-factor", "atlas_thermompnn_rmsf", "atlas_thermompnn_bfactor"),
-        ("ATLAS vs BBFlow (RMSF)", "atlas_thermompnn_rmsf", "bbflow_thermompnn_rmsf"),
+        ("RMSF", [
+            ("atlas_thermompnn_rmsf", "tab:blue", "ATLAS"),
+            ("bbflow_thermompnn_rmsf", "tab:orange", "BBFlow"),
+        ]),
+        ("B-factor", [
+            ("atlas_thermompnn_bfactor", "tab:blue", "ATLAS"),
+            ("pdb_designs_thermompnn_bfactor", "tab:orange", "PDB designs"),
+        ]),
     ]
 
-    for panel_idx, (title, key_a, key_b) in enumerate(panels):
+    for panel_idx, (title, series_list) in enumerate(panels):
         ax = axes[panel_idx]
 
-        for key, color, label in [(key_a, "tab:blue", key_a.split("_")[0].upper()),
-                                   (key_b, "tab:orange", key_b.split("_")[0].upper())]:
+        for series_idx, (key, color, label) in enumerate(series_list):
             run = results.get("runs", {}).get(key, {})
             multi = run.get("multi_ddg", {})
             models = multi.get("models", {})
@@ -400,19 +411,17 @@ def generate_fig4(results: dict, output_dir: Path):
             if not coefs:
                 continue
 
-            # Map to amino acids — coefs may be a list (with feature_names) or a dict
             feat_names = ridge.get("feature_names")
             if isinstance(coefs, list) and feat_names:
                 coef_dict = dict(zip(feat_names, coefs))
             elif isinstance(coefs, dict):
                 coef_dict = coefs
             else:
-                # Assume list is in AA_ORDER if no names
                 coef_dict = dict(zip(AA_ORDER, coefs)) if len(coefs) == 20 else {}
             vals = [coef_dict.get(aa, 0) for aa in AA_ORDER]
             x = np.arange(len(AA_ORDER))
             width = 0.35
-            offset = -width/2 if color == "tab:blue" else width/2
+            offset = -width/2 if series_idx == 0 else width/2
             ax.bar(x + offset, vals, width, color=color, alpha=0.8, label=label)
 
         ax.set_xticks(np.arange(len(AA_ORDER)))
