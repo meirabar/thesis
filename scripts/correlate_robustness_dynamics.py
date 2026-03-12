@@ -1147,6 +1147,7 @@ def generate_figures(
     output_dir: str,
     scorer: str,
     rob_col: str = "mean_abs_ddg",
+    dataset_name: str = "",
 ):
     """Generate publication figures."""
     try:
@@ -1160,6 +1161,10 @@ def generate_figures(
 
     fig_dir = Path(output_dir) / scorer / "figures"
     fig_dir.mkdir(parents=True, exist_ok=True)
+
+    # Build a filename prefix: {dataset}_{scorer}_{rob_col}_
+    rob_suffix = f"_{rob_col}" if rob_col != "mean_abs_ddg" else ""
+    prefix = f"{dataset_name}_{scorer}{rob_suffix}" if dataset_name else f"{scorer}{rob_suffix}"
 
     # --- Fig A: Distribution of per-protein rho (robustness vs RMSF) ---
     rhos_rob = [r.rho_robustness_rmsf for r in per_protein_results
@@ -1201,7 +1206,7 @@ def generate_figures(
                 ax.legend()
 
         plt.tight_layout()
-        plt.savefig(fig_dir / f"{scorer}_per_protein_correlations.png", dpi=150)
+        plt.savefig(fig_dir / f"{prefix}_per_protein_correlations.png", dpi=150)
         plt.close()
 
     # --- Fig B: Pooled scatter (z-scored) ---
@@ -1237,7 +1242,7 @@ def generate_figures(
         ax.axvline(0, color="gray", linewidth=0.5)
 
         plt.tight_layout()
-        plt.savefig(fig_dir / f"{scorer}_pooled_scatter.png", dpi=150)
+        plt.savefig(fig_dir / f"{prefix}_pooled_scatter.png", dpi=150)
         plt.close()
 
     # --- Fig C: Stratified bar chart ---
@@ -1263,7 +1268,7 @@ def generate_figures(
         ax.axhline(0, color="black", linewidth=0.5)
 
         plt.tight_layout()
-        plt.savefig(fig_dir / f"{scorer}_stratified_ss.png", dpi=150)
+        plt.savefig(fig_dir / f"{prefix}_stratified_ss.png", dpi=150)
         plt.close()
 
     print(f"Figures saved to {fig_dir}")
@@ -1346,12 +1351,13 @@ def run_analysis_for_scorer(
     """Run the full correlation analysis for one scorer."""
     rob_col = robustness_col  # short alias used throughout
     bfactor_only = (target == "bfactor")
+    dataset_name = Path(atlas_dir).name  # e.g. "atlas", "pdb_designs", "bbflow_processed"
     out_dir = Path(output_dir) / scorer
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # Find proteins that have both data and robustness data
     atlas_proteins_dir = Path(atlas_dir) / "proteins"
-    dataset_label = Path(atlas_dir).name  # e.g. "atlas", "bbflow_processed"
+    dataset_label = dataset_name  # alias used in print statements
     if not atlas_proteins_dir.exists():
         print(f"ERROR: proteins dir not found: {atlas_proteins_dir}")
         return
@@ -1670,7 +1676,7 @@ def run_analysis_for_scorer(
         generate_figures(
             per_protein_results, per_protein_data, pooled,
             strat_ss, strat_burial, output_dir, scorer,
-            rob_col=rob_col,
+            rob_col=rob_col, dataset_name=dataset_name,
         )
 
 

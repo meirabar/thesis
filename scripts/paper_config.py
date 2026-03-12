@@ -1,0 +1,228 @@
+#!/usr/bin/env python3
+"""
+Paper configuration: defines all analyses, datasets, and output specifications
+for the robustness-dynamics paper.
+
+This is the single source of truth for what analyses are needed and where
+data lives. Used by:
+  - run_all_analyses.py   (run missing analyses on cluster)
+  - collect_results.py    (gather results into unified JSON)
+  - generate_paper_outputs.py (generate LaTeX tables + figures)
+
+Usage:
+  from paper_config import DATASETS, ANALYSIS_RUNS, CLUSTER_PATHS
+"""
+
+from dataclasses import dataclass, field
+from typing import List, Optional
+from pathlib import Path
+
+
+# ============================================================================
+# CLUSTER PATHS
+# ============================================================================
+
+@dataclass
+class ClusterPaths:
+    project_dir: str = "/sci/labs/orzuk/orzuk/projects/ProteinStability"
+    repo_dir: str = "/sci/labs/orzuk/orzuk/github/meira_thesis"
+    venv: str = "/sci/labs/orzuk/orzuk/projects/ProteinStability/envs/robustness"
+    log_dir: str = "/sci/labs/orzuk/orzuk/projects/ProteinStability/logs"
+    paper_results_dir: str = "/sci/labs/orzuk/orzuk/projects/ProteinStability/data/paper_results"
+
+    @property
+    def scripts_dir(self):
+        return f"{self.repo_dir}/scripts"
+
+CLUSTER = ClusterPaths()
+
+
+# ============================================================================
+# DATASET DEFINITIONS
+# ============================================================================
+
+@dataclass
+class Dataset:
+    name: str               # e.g., "atlas", "bbflow", "pdb_designs"
+    display_name: str       # e.g., "ATLAS", "BBFlow", "PDB designs"
+    data_dir: str           # where proteins/ directory lives
+    robustness_dir: str     # where {scorer}/ robustness outputs live
+    analysis_dir: str       # where correlation/regression outputs go
+    dataset_type: str       # "natural" or "designed"
+    available_targets: List[str]   # ["rmsf"], ["bfactor"], or ["rmsf", "bfactor"]
+    available_scorers: List[str] = field(default_factory=lambda: ["esm1v", "thermompnn"])
+    n_proteins_approx: int = 0
+    bfactor_only: bool = False     # pass --target bfactor to correlate script
+    has_plddt: bool = True
+
+
+DATASETS = {
+    "atlas": Dataset(
+        name="atlas",
+        display_name="ATLAS",
+        data_dir=f"{CLUSTER.project_dir}/data/atlas",
+        robustness_dir=f"{CLUSTER.project_dir}/data/atlas_robustness",
+        analysis_dir=f"{CLUSTER.project_dir}/data/atlas_analysis",
+        dataset_type="natural",
+        available_targets=["rmsf", "bfactor"],
+        n_proteins_approx=1928,
+    ),
+    "bbflow": Dataset(
+        name="bbflow",
+        display_name="BBFlow",
+        data_dir=f"{CLUSTER.project_dir}/data/bbflow_processed",
+        robustness_dir=f"{CLUSTER.project_dir}/data/bbflow_robustness",
+        analysis_dir=f"{CLUSTER.project_dir}/data/bbflow_analysis",
+        dataset_type="designed",
+        available_targets=["rmsf"],
+        n_proteins_approx=100,
+    ),
+    "pdb_designs": Dataset(
+        name="pdb_designs",
+        display_name="PDB designs",
+        data_dir=f"{CLUSTER.project_dir}/data/pdb_designs",
+        robustness_dir=f"{CLUSTER.project_dir}/data/pdb_designs_robustness",
+        analysis_dir=f"{CLUSTER.project_dir}/data/pdb_designs_analysis",
+        dataset_type="designed",
+        available_targets=["bfactor"],
+        available_scorers=["thermompnn"],  # ESM-1v not run for PDB designs
+        n_proteins_approx=317,
+        bfactor_only=True,
+        has_plddt=False,
+    ),
+}
+
+
+# ============================================================================
+# ANALYSIS RUN DEFINITIONS
+# ============================================================================
+
+@dataclass
+class AnalysisRun:
+    """One specific analysis run = (dataset, scorer, target)."""
+    dataset: str
+    scorer: str
+    target: str  # "rmsf" or "bfactor"
+
+    @property
+    def key(self) -> str:
+        return f"{self.dataset}_{self.scorer}_{self.target}"
+
+    @property
+    def ds(self) -> Dataset:
+        return DATASETS[self.dataset]
+
+    @property
+    def pooled_json_path(self) -> str:
+        return f"{self.ds.analysis_dir}/{self.scorer}/pooled_results.json"
+
+    @property
+    def stratified_json_path(self) -> str:
+        return f"{self.ds.analysis_dir}/{self.scorer}/stratified_results.json"
+
+    @property
+    def per_protein_tsv_path(self) -> str:
+        return f"{self.ds.analysis_dir}/{self.scorer}/per_protein_correlations.tsv"
+
+    @property
+    def multi_ddg_json_path(self) -> str:
+        return f"{self.ds.analysis_dir}/{self.scorer}/multi_ddg_{self.target}_results.json"
+
+
+def generate_all_runs() -> List[AnalysisRun]:
+    """Generate all valid (dataset, scorer, target) combinations."""
+    runs = []
+    for ds in DATASETS.values():
+        for scorer in ds.available_scorers:
+            for target in ds.available_targets:
+                runs.append(AnalysisRun(dataset=ds.name, scorer=scorer, target=target))
+    return runs
+
+
+# All correlation analysis runs
+CORRELATION_RUNS = generate_all_runs()
+
+# Multi-DDG regression runs (ThermoMPNN only, as ESM-1v was skipped)
+MULTI_DDG_RUNS = [r for r in CORRELATION_RUNS if r.scorer == "thermompnn"]
+
+
+# ============================================================================
+# PAPER TABLE SPECIFICATIONS
+# ============================================================================
+
+# Column order for Table 1 (main results)
+TABLE1_COLUMNS = [
+    ("atlas", "rmsf"),
+    ("bbflow", "rmsf"),
+    ("atlas", "bfactor"),
+    ("pdb_designs", "bfactor"),
+]
+
+# Table 1 predictor rows
+TABLE1_PREDICTORS = ["esm1v", "thermompnn", "plddt", "sasa"]
+
+# Table 2 strata
+TABLE2_SS_STRATA = ["H", "E", "C"]
+TABLE2_BURIAL_STRATA = ["core", "boundary", "surface"]
+
+# Table 3 models for multi-DDG comparison (in display order)
+TABLE3_MODEL_ORDER = [
+    # Scalar baselines
+    "ols_std_ddg",       # OLS on std(DDG) - same as our primary index
+    "ols_mean_abs_ddg",
+    "ols_sasa",
+    "ols_plddt",
+    "ols_mean_plddt",    # OLS on mean|DDG| + pLDDT
+    # Ridge models
+    "ridge_20ddg",
+    "ridge_nonlinear_only",
+    "ridge_20ddg_nonlinear",
+    "ridge_20ddg_plddt",
+    "ridge_20ddg_nonlinear_plddt",
+]
+
+# Alternative robustness scalar measures (for Table 3 top half)
+ALT_ROBUSTNESS_MEASURES = [
+    ("std_ddg", r"$\operatorname{std}(\Delta\Delta G)$"),
+    ("max_ddg", r"$\max|\Delta\Delta G|$"),
+    ("frac_destab", r"frac.\ destabilizing"),
+    ("mean_abs_ddg", r"mean $|\Delta\Delta G|$"),
+    ("frac_neutral", r"frac.\ neutral"),
+]
+
+
+# ============================================================================
+# FIGURE SPECIFICATIONS
+# ============================================================================
+
+# Figure 1: 4-panel per-protein correlation distributions
+FIG1_PANELS = TABLE1_COLUMNS  # same 4 dataset-target combos
+
+# Figure 2: 4-panel 2D density scatter with marginals
+FIG2_PANELS = TABLE1_COLUMNS
+
+# Figure 3: Multi-DDG model comparison (2 panels: ATLAS, BBFlow)
+FIG3_PANELS = [("atlas", "rmsf"), ("bbflow", "rmsf")]
+
+# Figure 4: DDG coefficients (2 panels: ATLAS RMSF vs B-fac, ATLAS vs BBFlow)
+FIG4_PANELS = [("atlas", "rmsf"), ("atlas", "bfactor")]
+
+
+# ============================================================================
+# SLURM SETTINGS
+# ============================================================================
+
+SLURM_DEFAULTS = {
+    "correlation": {
+        "time": "02:00:00",
+        "mem": "16G",
+        "cpus": 4,
+        "partition": "galileo",
+    },
+    "multi_ddg": {
+        "time": "04:00:00",
+        "mem": "32G",
+        "cpus": 4,
+        "partition": "galileo",
+    },
+}
