@@ -336,7 +336,7 @@ def generate_table3(results: dict) -> str:
         "ols_mean_abs_ddg": (r"OLS mean$|\Delta\Delta G|$", 1),
         "ols_sasa": ("OLS SASA", 1),
         "ols_plddt": ("OLS pLDDT", 1),
-        "ols_mean_plddt": (r"OLS std $+$ pLDDT", 2),
+        "ols_std_plddt": (r"OLS std $+$ pLDDT", 2),
         "ridge_20ddg": (r"Ridge: 20 $\Delta\Delta G$", 20),
         "ridge_nonlinear_only": ("Ridge: 4 NL only", 4),
         "ridge_20ddg_nonlinear": (r"Ridge: 20 $\Delta\Delta G$ + 4 NL", 24),
@@ -359,7 +359,7 @@ def generate_table3(results: dict) -> str:
         lines.append(" & ".join(row) + r" \\")
 
         # Add midrule after baselines
-        if model_key == "ols_mean_plddt":
+        if model_key == "ols_std_plddt":
             lines.append(r"\midrule")
 
     # Delta R² row

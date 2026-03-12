@@ -172,7 +172,7 @@ TABLE3_MODEL_ORDER = [
     "ols_mean_abs_ddg",
     "ols_sasa",
     "ols_plddt",
-    "ols_mean_plddt",    # OLS on mean|DDG| + pLDDT
+    "ols_std_plddt",     # OLS on std(DDG) + pLDDT
     # Ridge models
     "ridge_20ddg",
     "ridge_nonlinear_only",

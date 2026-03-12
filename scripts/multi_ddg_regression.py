@@ -238,13 +238,16 @@ def build_dataset(
         if sasa is not None and len(sasa) != L:
             sasa = None
 
-        # mean_abs_ddg from robustness TSV
+        # mean_abs_ddg and std_ddg from robustness TSV
         rob_tsv = Path(robustness_dir) / scorer / f"{pid}_robustness.tsv"
         mean_abs_ddg = None
+        std_ddg = None
         if rob_tsv.exists():
             rob_df = pd.read_csv(rob_tsv, sep="\t")
             if "mean_abs_ddg" in rob_df.columns and len(rob_df) == L:
                 mean_abs_ddg = rob_df["mean_abs_ddg"].values
+            if "std_ddg" in rob_df.columns and len(rob_df) == L:
+                std_ddg = rob_df["std_ddg"].values
 
         # Filter valid rows (no NaN in DDG or target)
         valid = ~(np.isnan(ddg_20).any(axis=1) | np.isnan(y))
@@ -261,6 +264,7 @@ def build_dataset(
             "plddt": plddt[valid] if plddt is not None else None,
             "sasa": sasa[valid] if sasa is not None else None,
             "mean_abs_ddg": mean_abs_ddg[valid] if mean_abs_ddg is not None else None,
+            "std_ddg": std_ddg[valid] if std_ddg is not None else None,
             "n_residues": int(n_valid),
         }
         dataset.append(entry)
@@ -345,6 +349,11 @@ def run_cv_regression(
             return None
         return np.column_stack([entry["ddg_20"], entry["plddt"]])
 
+    def extract_std_ddg(entry):
+        if entry["std_ddg"] is None:
+            return None
+        return entry["std_ddg"].reshape(-1, 1)
+
     def extract_mean_abs_ddg(entry):
         if entry["mean_abs_ddg"] is None:
             return None
@@ -354,6 +363,11 @@ def run_cv_regression(
         if entry["plddt"] is None:
             return None
         return entry["plddt"].reshape(-1, 1)
+
+    def extract_std_plddt(entry):
+        if entry["std_ddg"] is None or entry["plddt"] is None:
+            return None
+        return np.column_stack([entry["std_ddg"], entry["plddt"]])
 
     def extract_mean_plddt(entry):
         if entry["mean_abs_ddg"] is None or entry["plddt"] is None:
@@ -396,6 +410,12 @@ def run_cv_regression(
             "feature_names": list(AA_LIST) + ["pLDDT"],
             "n_features": 21,
         },
+        "ols_std_ddg": {
+            "extractor": extract_std_ddg,
+            "use_ridge": False,
+            "feature_names": ["std_ddg"],
+            "n_features": 1,
+        },
         "ols_mean_abs_ddg": {
             "extractor": extract_mean_abs_ddg,
             "use_ridge": False,
@@ -407,6 +427,12 @@ def run_cv_regression(
             "use_ridge": False,
             "feature_names": ["pLDDT"],
             "n_features": 1,
+        },
+        "ols_std_plddt": {
+            "extractor": extract_std_plddt,
+            "use_ridge": False,
+            "feature_names": ["std_ddg", "pLDDT"],
+            "n_features": 2,
         },
         "ols_mean_plddt": {
             "extractor": extract_mean_plddt,
