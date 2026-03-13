@@ -447,6 +447,13 @@ class PerProteinResult:
     r2_joint_multi_rob: float = np.nan
     delta_r2_multi_rob_over_plddt: float = np.nan
 
+    # Alternative robustness measures vs B-factor
+    rho_frac_destab_bfactor: float = np.nan
+    rho_frac_neutral_bfactor: float = np.nan
+    rho_std_ddg_bfactor: float = np.nan
+    rho_max_ddg_bfactor: float = np.nan
+    rho_mean_abs_ddg_bfactor: float = np.nan
+
     # === B-factor as TARGET (predicting experimental dynamics) ===
     # Robustness vs B-factor (primary)
     rho_robustness_bfactor_target: float = np.nan
@@ -730,6 +737,18 @@ def correlate_single_protein(
         result.pval_robustness_bfactor_target = pval
         r, _ = scipy_stats.pearsonr(bfac_target[rob_col], bfac_target["bfactor"])
         result.r2_robustness_bfactor_target = r ** 2
+
+        # --- Alternative robustness measures vs B-factor ---
+        for col, attr in [("frac_destabilizing", "rho_frac_destab_bfactor"),
+                           ("frac_neutral", "rho_frac_neutral_bfactor"),
+                           ("std_ddg", "rho_std_ddg_bfactor"),
+                           ("max_ddg", "rho_max_ddg_bfactor"),
+                           ("mean_abs_ddg", "rho_mean_abs_ddg_bfactor")]:
+            if col in bfac_target.columns:
+                valid_alt = bfac_target.dropna(subset=[col])
+                if len(valid_alt) >= 10:
+                    rho_alt, _ = scipy_stats.spearmanr(valid_alt[col], valid_alt["bfactor"])
+                    setattr(result, attr, rho_alt)
 
         # --- pLDDT vs B-factor (baseline) ---
         bf_plddt = bfac_target.dropna(subset=["plddt"])

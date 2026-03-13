@@ -208,8 +208,8 @@ def collect_correlation_run(run) -> dict:
             ]:
                 # Try target-specific column first, then fallback
                 col = f"{col_prefix}_{target_suffix}"
-                if col not in pp_df.columns:
-                    col = f"{col_prefix}_rmsf"  # fallback for aliased datasets
+                if col not in pp_df.columns and target_suffix != "rmsf":
+                    col = f"{col_prefix}_rmsf"  # fallback only if bfactor column missing
                 if col not in pp_df.columns:
                     col = col_prefix  # bare column name
                 if col in pp_df.columns:

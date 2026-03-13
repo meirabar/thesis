@@ -25,9 +25,19 @@ from matplotlib.gridspec import GridSpec
 from scipy import stats as scipy_stats
 
 from paper_config import (
-    DATASETS, TABLE1_COLUMNS,
-    FIG1_PANELS, FIG2_PANELS, FIG3_PANELS, FIG4_PANELS,
+    DATASETS,
+    FIG1_PANELS, FIG2_PANELS,
 )
+
+# Global font settings for publication readability
+plt.rcParams.update({
+    "font.size": 15,
+    "axes.titlesize": 18,
+    "axes.labelsize": 16,
+    "xtick.labelsize": 14,
+    "ytick.labelsize": 14,
+    "legend.fontsize": 14,
+})
 
 
 # ============================================================================
@@ -140,14 +150,12 @@ def generate_fig1(results: dict, output_dir: Path):
                 continue
 
             # Determine the rho column name
-            # For RMSF target: rho_std_ddg_rmsf; for bfactor target: rho_robustness_bfactor_target
             rho_candidates = [
                 f"rho_std_ddg_{target}",
                 "rho_robustness_bfactor_target" if target == "bfactor" else "rho_std_ddg_rmsf",
             ]
             rho_col = next((c for c in rho_candidates if c in pp.columns), None)
             if rho_col is None:
-                # Fallback: any column with "rho" and either "std_ddg" or "robustness"
                 for c in pp.columns:
                     if "rho" in c and ("std_ddg" in c or "robustness_bfactor" in c):
                         rho_col = c
@@ -191,20 +199,22 @@ def generate_fig1(results: dict, output_dir: Path):
                         ax_scat.set_xlabel(r"$\rho$(rob, target)")
                         ax_scat.set_ylabel(r"$\rho$(pLDDT, target)")
         else:
-            # No pLDDT available (e.g., PDB designs)
             ax_scat.text(0.5, 0.5, "No pLDDT\navailable",
                          transform=ax_scat.transAxes,
-                         ha="center", va="center", fontsize=11, color="gray")
+                         ha="center", va="center", fontsize=13, color="gray")
             ax_scat.set_xlim([-1, 1])
             ax_scat.set_ylim([-1, 1])
             ax_scat.set_xlabel(r"$\rho$(rob, target)")
             ax_scat.set_ylabel(r"$\rho$(pLDDT, target)")
 
-        ax_hist.set_title(panel_label, fontsize=12, fontweight="bold")
+        ax_hist.set_title(panel_label, fontweight="bold")
         ax_hist.set_xlabel(r"Per-protein Spearman $\rho$")
         ax_hist.set_ylabel("Count")
-        ax_hist.legend(fontsize=8)
         ax_hist.set_xlim([-1, 1])
+
+        # Legend only on first panel, no frame
+        if col_idx == 0:
+            ax_hist.legend(frameon=False)
 
     plt.tight_layout()
     for ext in ["pdf", "png"]:
@@ -247,14 +257,6 @@ def generate_fig2(results: dict, output_dir: Path):
         y_clip = np.percentile(y, 99)
         y_floor = np.percentile(y, 1)
 
-        # Create subplot with marginals using GridSpec
-        gs = GridSpec(3, 3, figure=fig,
-                      left=0.05 + 0.25 * panel_idx,
-                      right=0.05 + 0.25 * (panel_idx + 1) - 0.02,
-                      bottom=0.55 if panel_idx < 2 else 0.05,
-                      top=0.95 if panel_idx < 2 else 0.45,
-                      hspace=0.05, wspace=0.05)
-
         # Remap panel positions for 2x2 layout
         row = 0 if panel_idx < 2 else 1
         col = panel_idx % 2
@@ -275,8 +277,8 @@ def generate_fig2(results: dict, output_dir: Path):
         hb = ax_main.hexbin(x[mask], y[mask], gridsize=40, cmap="Blues",
                              mincnt=1, linewidths=0.2)
         cb = fig.colorbar(hb, ax=ax_right, pad=0.1, shrink=0.8)
-        cb.set_label("Count", fontsize=8)
-        cb.ax.tick_params(labelsize=7)
+        cb.set_label("Count", fontsize=11)
+        cb.ax.tick_params(labelsize=10)
         ax_main.set_xlabel(r"$\operatorname{std}(\Delta\Delta G)$ (z-scored)")
         ax_main.set_ylabel(f"{target_label} (z-scored)")
         ax_main.set_ylim(y_floor, y_clip)
@@ -295,7 +297,7 @@ def generate_fig2(results: dict, output_dir: Path):
         rho = scipy_stats.spearmanr(x, y)[0]
         ax_top.set_title(f"{ds.display_name} {target_label} "
                          f"($\\rho = {rho:.3f}$, $n = {len(x):,}$)",
-                         fontsize=11, fontweight="bold")
+                         fontsize=14, fontweight="bold")
 
     for ext in ["pdf", "png"]:
         fig.savefig(output_dir / f"fig2_density_scatter.{ext}",
@@ -379,10 +381,13 @@ def generate_fig3(results: dict, output_dir: Path):
 
         display_names = [model_display[m] for m in all_model_names]
         ax.set_xticks(x)
-        ax.set_xticklabels(display_names, rotation=45, ha="right", fontsize=9)
+        ax.set_xticklabels(display_names, rotation=45, ha="right")
         ax.set_ylabel("CV $R^2$")
-        ax.set_title(title, fontsize=13, fontweight="bold")
-        ax.legend(fontsize=10)
+        ax.set_title(title, fontweight="bold")
+
+        # Legend only on first panel, no frame
+        if panel_idx == 0:
+            ax.legend(frameon=False)
 
     plt.tight_layout()
     for ext in ["pdf", "png"]:
@@ -441,11 +446,14 @@ def generate_fig4(results: dict, output_dir: Path):
             ax.bar(x + offset, vals, width, color=color, alpha=0.8, label=label)
 
         ax.set_xticks(np.arange(len(AA_ORDER)))
-        ax.set_xticklabels(AA_ORDER, fontsize=10)
+        ax.set_xticklabels(AA_ORDER)
         ax.set_ylabel("Ridge coefficient")
-        ax.set_title(title, fontsize=12, fontweight="bold")
+        ax.set_title(title, fontweight="bold")
         ax.axhline(0, color="gray", linewidth=0.5)
-        ax.legend()
+
+        # Legend only on first panel, no frame, upper left to avoid bars
+        if panel_idx == 0:
+            ax.legend(frameon=False, loc="upper left")
 
     plt.tight_layout()
     for ext in ["pdf", "png"]:

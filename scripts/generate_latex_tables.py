@@ -42,6 +42,34 @@ def _signed(val, decimals=3):
     return f"$+${val:.{decimals}f}"
 
 
+def _bold(text):
+    """Wrap LaTeX text in bold."""
+    return r"\textbf{" + text + "}"
+
+
+def _highlight_best_in_row(cells, higher_is_better=True, use_abs=False):
+    """Bold the best (highest |value| or highest/lowest value) among cells.
+
+    cells: list of (formatted_string, raw_value_or_None).
+    Returns list of formatted strings with the best one bolded.
+    """
+    valid = [(i, abs(v) if use_abs else v)
+             for i, (_, v) in enumerate(cells) if v is not None]
+    if not valid:
+        return [c[0] for c in cells]
+    if higher_is_better:
+        best_idx = max(valid, key=lambda x: x[1])[0]
+    else:
+        best_idx = min(valid, key=lambda x: x[1])[0]
+    result = []
+    for i, (fmt_str, _) in enumerate(cells):
+        if i == best_idx and fmt_str != "---":
+            result.append(_bold(fmt_str))
+        else:
+            result.append(fmt_str)
+    return result
+
+
 def _get_run(results, dataset, scorer, target):
     """Get a run from the unified results, or empty dict."""
     key = f"{dataset}_{scorer}_{target}"
@@ -72,9 +100,19 @@ def generate_table1(results: dict) -> str:
     lines = []
     lines.append(r"\begin{table}[htbp]")
     lines.append(r"\centering")
-    lines.append(r"\caption{Robustness vs.\ dynamics: bivariate correlations, incremental")
-    lines.append(r"regression, and partial correlations across all four dataset--target")
-    lines.append(r"combinations. Robustness: $\operatorname{std}(\Delta\Delta G)$.")
+    lines.append(r"\caption{Bivariate correlations, incremental variance explained,")
+    lines.append(r"and partial correlations between per-residue predictors and dynamics")
+    lines.append(r"targets across four dataset--target combinations.")
+    lines.append(r"\emph{Median per-protein $\rho$}: median across proteins of the")
+    lines.append(r"within-protein Spearman rank correlation.")
+    lines.append(r"\emph{Pooled $\rho$}: Spearman correlation on all residues after")
+    lines.append(r"within-protein z-scoring.")
+    lines.append(r"\emph{Pooled $R^2$}: OLS on z-scored residues.")
+    lines.append(r"\emph{$\Delta R^2$}: increase in $R^2$ when adding ThermoMPNN")
+    lines.append(r"$\operatorname{std}(\Delta\Delta G)$ to the baseline predictor.")
+    lines.append(r"\emph{Partial $\rho$}: Spearman correlation of robustness vs.")
+    lines.append(r"target after controlling for the indicated confounder.")
+    lines.append(r"Best value in each predictor comparison is shown in \textbf{bold}.")
     lines.append(r"All pooled correlations significant at $p < 10^{-10}$.}")
     lines.append(r"\label{tab:pooled}")
     lines.append(r"\small")
@@ -92,13 +130,6 @@ def generate_table1(results: dict) -> str:
     lines.append(" & ".join(headers2) + r" \\")
     lines.append(r"\midrule")
 
-    # Helper: get value for a (dataset, target) column
-    def _val(dataset, target, scorer, getter, field):
-        run = _get_run(results, dataset, scorer, target)
-        if not run or run.get("status") == "missing":
-            return None
-        return getter(run, field)
-
     # n proteins / n residues
     row_np = ["$n$ proteins"]
     row_nr = ["$n$ residues"]
@@ -112,48 +143,80 @@ def generate_table1(results: dict) -> str:
     lines.append(" & ".join(row_nr) + r" \\")
     lines.append(r"\midrule")
 
-    # --- Median per-protein rho ---
+    # --- Median per-protein rho (highlight best |rho| per column) ---
     lines.append(r"\multicolumn{5}{l}{\textit{Median per-protein Spearman $\rho$ (predictor, target)}} \\")
-    for pred in ["esm1v", "thermompnn", "plddt", "sasa"]:
-        label = {"esm1v": "ESM-1v", "thermompnn": "ThermoMPNN",
-                 "plddt": "pLDDT", "sasa": "SASA"}[pred]
-        row = [r"\quad " + label]
+
+    # Collect all values first for per-column highlighting
+    pred_list = ["esm1v", "thermompnn", "plddt", "sasa"]
+    pred_labels = {"esm1v": "ESM-1v", "thermompnn": "ThermoMPNN",
+                   "plddt": "pLDDT", "sasa": "SASA"}
+    med_rho_grid = []  # [pred_idx][col_idx] = (formatted, raw_val)
+    for pred in pred_list:
+        row_cells = []
         for ds_name, target in TABLE1_COLUMNS:
             if pred in ("plddt", "sasa"):
-                # pLDDT and SASA are scorer-independent; use thermompnn run
                 run = _get_run(results, ds_name, "thermompnn", target)
-                field = f"median_rho_{pred}"
-                val = _get_pp(run, field)
+                val = _get_pp(run, f"median_rho_{pred}")
             else:
                 run = _get_run(results, ds_name, pred, target)
                 val = _get_pp(run, "median_rho_robustness")
-            row.append(_signed(val))
+            row_cells.append((_signed(val), val))
+        med_rho_grid.append(row_cells)
+
+    # Highlight best |rho| per column
+    n_cols = len(TABLE1_COLUMNS)
+    for col_idx in range(n_cols):
+        col_cells = [(med_rho_grid[pred_idx][col_idx][0],
+                       med_rho_grid[pred_idx][col_idx][1])
+                      for pred_idx in range(len(pred_list))]
+        highlighted = _highlight_best_in_row(col_cells, higher_is_better=True, use_abs=True)
+        for pred_idx in range(len(pred_list)):
+            old_fmt, old_val = med_rho_grid[pred_idx][col_idx]
+            med_rho_grid[pred_idx][col_idx] = (highlighted[pred_idx], old_val)
+
+    for pred_idx, pred in enumerate(pred_list):
+        row = [r"\quad " + pred_labels[pred]]
+        for col_idx in range(n_cols):
+            row.append(med_rho_grid[pred_idx][col_idx][0])
         lines.append(" & ".join(row) + r" \\")
     lines.append(r"\midrule")
 
-    # --- Pooled rho ---
+    # --- Pooled rho (highlight best |rho| per column) ---
     lines.append(r"\multicolumn{5}{l}{\textit{Pooled Spearman $\rho$ (z-scored residues)}} \\")
-    for pred in ["esm1v", "thermompnn", "plddt", "sasa"]:
-        label = {"esm1v": "ESM-1v", "thermompnn": "ThermoMPNN",
-                 "plddt": "pLDDT", "sasa": "SASA"}[pred]
-        row = [r"\quad " + label]
+    pooled_rho_grid = []
+    for pred in pred_list:
+        row_cells = []
         for ds_name, target in TABLE1_COLUMNS:
             if pred in ("plddt", "sasa"):
                 run = _get_run(results, ds_name, "thermompnn", target)
-                field = f"pooled_rho_{pred}"
-                val = _get_corr(run, field)
+                val = _get_corr(run, f"pooled_rho_{pred}")
             else:
                 run = _get_run(results, ds_name, pred, target)
                 val = _get_corr(run, "pooled_rho_robustness")
-            row.append(_signed(val))
+            row_cells.append((_signed(val), val))
+        pooled_rho_grid.append(row_cells)
+
+    for col_idx in range(n_cols):
+        col_cells = [(pooled_rho_grid[p][col_idx][0],
+                       pooled_rho_grid[p][col_idx][1])
+                      for p in range(len(pred_list))]
+        highlighted = _highlight_best_in_row(col_cells, higher_is_better=True, use_abs=True)
+        for p in range(len(pred_list)):
+            pooled_rho_grid[p][col_idx] = (highlighted[p], pooled_rho_grid[p][col_idx][1])
+
+    for pred_idx, pred in enumerate(pred_list):
+        row = [r"\quad " + pred_labels[pred]]
+        for col_idx in range(n_cols):
+            row.append(pooled_rho_grid[pred_idx][col_idx][0])
         lines.append(" & ".join(row) + r" \\")
     lines.append(r"\midrule")
 
-    # --- Pooled R² ---
+    # --- Pooled R² (highlight best per column) ---
     lines.append(r"\multicolumn{5}{l}{\textit{Pooled $R^2$ (OLS on z-scored residues)}} \\")
-    for pred in ["esm1v", "thermompnn", "plddt"]:
-        label = {"esm1v": "ESM-1v", "thermompnn": "ThermoMPNN", "plddt": "pLDDT"}[pred]
-        row = [r"\quad " + label]
+    r2_preds = ["esm1v", "thermompnn", "plddt"]
+    r2_grid = []
+    for pred in r2_preds:
+        row_cells = []
         for ds_name, target in TABLE1_COLUMNS:
             if pred == "plddt":
                 run = _get_run(results, ds_name, "thermompnn", target)
@@ -161,7 +224,21 @@ def generate_table1(results: dict) -> str:
             else:
                 run = _get_run(results, ds_name, pred, target)
                 val = _get_corr(run, "pooled_r2_robustness")
-            row.append(_fmt(val))
+            row_cells.append((_fmt(val), val))
+        r2_grid.append(row_cells)
+
+    for col_idx in range(n_cols):
+        col_cells = [(r2_grid[p][col_idx][0], r2_grid[p][col_idx][1])
+                      for p in range(len(r2_preds))]
+        highlighted = _highlight_best_in_row(col_cells, higher_is_better=True)
+        for p in range(len(r2_preds)):
+            r2_grid[p][col_idx] = (highlighted[p], r2_grid[p][col_idx][1])
+
+    for pred_idx, pred in enumerate(r2_preds):
+        label = {"esm1v": "ESM-1v", "thermompnn": "ThermoMPNN", "plddt": "pLDDT"}[pred]
+        row = [r"\quad " + label]
+        for col_idx in range(n_cols):
+            row.append(r2_grid[pred_idx][col_idx][0])
         lines.append(" & ".join(row) + r" \\")
     lines.append(r"\midrule")
 
@@ -215,9 +292,14 @@ def generate_table2(results: dict) -> str:
     lines = []
     lines.append(r"\begin{table}[htbp]")
     lines.append(r"\centering")
-    lines.append(r"\caption{Stratified pooled Spearman $\rho$ (ThermoMPNN")
-    lines.append(r"$\operatorname{std}(\Delta\Delta G)$ vs.\ target).")
-    lines.append(r"pLDDT values shown in parentheses where available.}")
+    lines.append(r"\caption{Stratified pooled Spearman $\rho$ between ThermoMPNN")
+    lines.append(r"$\operatorname{std}(\Delta\Delta G)$ and dynamics target,")
+    lines.append(r"grouped by secondary structure (DSSP classification: $\alpha$-helix H,")
+    lines.append(r"$\beta$-sheet E, coil C) and by burial class (SASA-based terciles:")
+    lines.append(r"core $<$ 20\%, boundary 20--50\%, surface $>$ 50\% relative")
+    lines.append(r"solvent accessibility).")
+    lines.append(r"pLDDT values shown in parentheses where available.")
+    lines.append(r"Best $|\rho|$ within each structural category is shown in \textbf{bold}.}")
     lines.append(r"\label{tab:stratified}")
     lines.append(r"\small")
     lines.append(r"\begin{tabular}{@{}l cccc@{}}")
@@ -234,11 +316,13 @@ def generate_table2(results: dict) -> str:
     lines.append(" & ".join(headers2) + r" \\")
     lines.append(r"\midrule")
 
+    n_cols = len(TABLE1_COLUMNS)
+
     # Secondary structure
     lines.append(r"\multicolumn{5}{l}{\textit{Secondary structure}} \\")
-    ss_labels = {"H": "Helix", "E": "Sheet", "C": "Coil"}
+    ss_labels = {"H": r"$\alpha$-helix", "E": r"$\beta$-sheet", "C": "Coil"}
     for ss in TABLE2_SS_STRATA:
-        row = [r"\quad " + ss_labels[ss]]
+        row_cells = []
         for ds_name, target in TABLE1_COLUMNS:
             run = _get_run(results, ds_name, "thermompnn", target)
             rho_rob = _get_strat(run, "secondary_structure", ss, "rho_robustness")
@@ -249,7 +333,10 @@ def generate_table2(results: dict) -> str:
                     cell += r"\,(" + _signed(rho_plddt) + ")"
             else:
                 cell = "---"
-            row.append(cell)
+            row_cells.append((cell, rho_rob))
+        # Highlight best |rho| across columns for this stratum
+        highlighted = _highlight_best_in_row(row_cells, higher_is_better=True, use_abs=True)
+        row = [r"\quad " + ss_labels[ss]] + highlighted
         lines.append(" & ".join(row) + r" \\")
     lines.append(r"\midrule")
 
@@ -257,7 +344,7 @@ def generate_table2(results: dict) -> str:
     lines.append(r"\multicolumn{5}{l}{\textit{Burial (SASA terciles)}} \\")
     burial_labels = {"core": "Core", "boundary": "Boundary", "surface": "Surface"}
     for burial in TABLE2_BURIAL_STRATA:
-        row = [r"\quad " + burial_labels[burial]]
+        row_cells = []
         for ds_name, target in TABLE1_COLUMNS:
             run = _get_run(results, ds_name, "thermompnn", target)
             rho_rob = _get_strat(run, "burial", burial, "rho_robustness")
@@ -268,7 +355,9 @@ def generate_table2(results: dict) -> str:
                     cell += r"\,(" + _signed(rho_plddt) + ")"
             else:
                 cell = "---"
-            row.append(cell)
+            row_cells.append((cell, rho_rob))
+        highlighted = _highlight_best_in_row(row_cells, higher_is_better=True, use_abs=True)
+        row = [r"\quad " + burial_labels[burial]] + highlighted
         lines.append(" & ".join(row) + r" \\")
 
     lines.append(r"\bottomrule")
@@ -286,8 +375,16 @@ def generate_table3(results: dict) -> str:
     lines = []
     lines.append(r"\begin{table}[htbp]")
     lines.append(r"\centering")
-    lines.append(r"\caption{Alternative robustness measures and multi-$\Delta\Delta G$")
-    lines.append(r"regression (ThermoMPNN scorer).}")
+    lines.append(r"\caption{Comparison of robustness summary statistics and")
+    lines.append(r"multi-$\Delta\Delta G$ regression models (ThermoMPNN scorer).")
+    lines.append(r"\emph{Top panel}: median per-protein $|\rho|$ for scalar")
+    lines.append(r"robustness summaries; higher is better.")
+    lines.append(r"\emph{Bottom panel}: 5-fold protein-level cross-validated $R^2$")
+    lines.append(r"for regression models predicting dynamics from $\Delta\Delta G$")
+    lines.append(r"features; proteins are held out as entire units so the model")
+    lines.append(r"must generalize to unseen proteins.")
+    lines.append(r"``Feats'' = number of input features.")
+    lines.append(r"Best value in each column section is shown in \textbf{bold}.}")
     lines.append(r"\label{tab:alt_and_multi}")
     lines.append(r"\small")
     lines.append(r"\begin{tabular}{@{}l r cccc@{}}")
@@ -298,32 +395,60 @@ def generate_table3(results: dict) -> str:
     lines.append(r"& Feats & \textbf{RMSF} & \textbf{RMSF} & \textbf{B-fac} & \textbf{B-fac} \\")
     lines.append(r"\midrule")
 
+    n_cols = len(TABLE1_COLUMNS)
+
     # --- Top half: scalar robustness summaries (median per-protein |rho|) ---
     lines.append(r"\multicolumn{6}{l}{\textit{Scalar robustness summaries (med.\ per-protein $|\rho|$)}} \\")
 
+    # Collect all alt robustness values for per-column highlighting
+    alt_grid = []  # [measure_idx][col_idx] = (formatted, raw_val)
     for measure_key, measure_label in ALT_ROBUSTNESS_MEASURES:
+        row_cells = []
+        for ds_name, target in TABLE1_COLUMNS:
+            run = _get_run(results, ds_name, "thermompnn", target)
+            alt = run.get("alt_robustness_medians", {})
+            val = alt.get(measure_key)
+            if val is not None:
+                row_cells.append((f"{abs(val):.3f}", abs(val)))
+            else:
+                row_cells.append(("---", None))
+        alt_grid.append(row_cells)
+
+    # Add pLDDT baseline row
+    plddt_cells = []
+    for ds_name, target in TABLE1_COLUMNS:
+        run = _get_run(results, ds_name, "thermompnn", target)
+        val = _get_pp(run, "median_rho_plddt")
+        if val is not None:
+            plddt_cells.append((f"{abs(val):.3f}", abs(val)))
+        else:
+            plddt_cells.append(("---", None))
+    alt_grid.append(plddt_cells)
+
+    # Highlight best per column across all scalar measures + pLDDT
+    for col_idx in range(n_cols):
+        col_cells = [(alt_grid[m][col_idx][0], alt_grid[m][col_idx][1])
+                      for m in range(len(alt_grid))]
+        highlighted = _highlight_best_in_row(col_cells, higher_is_better=True)
+        for m in range(len(alt_grid)):
+            alt_grid[m][col_idx] = (highlighted[m], alt_grid[m][col_idx][1])
+
+    # Output alt robustness rows
+    for m_idx, (measure_key, measure_label) in enumerate(ALT_ROBUSTNESS_MEASURES):
         is_primary = measure_key == "std_ddg"
         label = measure_label
         if is_primary:
             label += r" \textbf{(primary)}"
         row = [r"\quad " + label, "1"]
-        for ds_name, target in TABLE1_COLUMNS:
-            run = _get_run(results, ds_name, "thermompnn", target)
-            alt = run.get("alt_robustness_medians", {})
-            val = alt.get(measure_key)
-            # Show absolute value (these are |rho|)
-            if val is not None:
-                row.append(f"{abs(val):.3f}")
-            else:
-                row.append("---")
+        for col_idx in range(n_cols):
+            row.append(alt_grid[m_idx][col_idx][0])
         lines.append(" & ".join(row) + r" \\")
 
-    # pLDDT baseline
+    # pLDDT baseline row
+    plddt_idx = len(ALT_ROBUSTNESS_MEASURES)
     row = [r"\quad pLDDT (baseline)", "1"]
-    for ds_name, target in TABLE1_COLUMNS:
-        run = _get_run(results, ds_name, "thermompnn", target)
-        val = _get_pp(run, "median_rho_plddt")
-        row.append(f"{abs(val):.3f}" if val is not None else "---")
+    for col_idx in range(n_cols):
+        row.append(alt_grid[plddt_idx][col_idx][0])
     lines.append(" & ".join(row) + r" \\")
     lines.append(r"\midrule")
 
@@ -344,18 +469,36 @@ def generate_table3(results: dict) -> str:
         "ridge_20ddg_nonlinear_plddt": (r"Ridge: 20 $\Delta\Delta G$ + NL + pLDDT", 25),
     }
 
+    # Collect all model values for highlighting
+    model_grid = []  # [model_idx][col_idx] = (formatted, raw_val)
+    model_keys_used = []
     for model_key in TABLE3_MODEL_ORDER:
         if model_key not in model_info:
             continue
-        label, n_feats = model_info[model_key]
-        row = [r"\quad " + label, str(n_feats)]
+        model_keys_used.append(model_key)
+        row_cells = []
         for ds_name, target in TABLE1_COLUMNS:
             run = _get_run(results, ds_name, "thermompnn", target)
             multi = run.get("multi_ddg", {})
             models = multi.get("models", {})
             model = models.get(model_key, {})
             val = model.get("cv_r2_mean")
-            row.append(_fmt(val) if val is not None else "---")
+            row_cells.append((_fmt(val) if val is not None else "---", val))
+        model_grid.append(row_cells)
+
+    # Highlight best R² per column
+    for col_idx in range(n_cols):
+        col_cells = [(model_grid[m][col_idx][0], model_grid[m][col_idx][1])
+                      for m in range(len(model_grid))]
+        highlighted = _highlight_best_in_row(col_cells, higher_is_better=True)
+        for m in range(len(model_grid)):
+            model_grid[m][col_idx] = (highlighted[m], model_grid[m][col_idx][1])
+
+    for m_idx, model_key in enumerate(model_keys_used):
+        label, n_feats = model_info[model_key]
+        row = [r"\quad " + label, str(n_feats)]
+        for col_idx in range(n_cols):
+            row.append(model_grid[m_idx][col_idx][0])
         lines.append(" & ".join(row) + r" \\")
 
         # Add midrule after baselines
