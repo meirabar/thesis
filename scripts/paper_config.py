@@ -114,15 +114,15 @@ class AnalysisRun:
 
     @property
     def pooled_json_path(self) -> str:
-        return f"{self.ds.analysis_dir}/{self.scorer}/pooled_results.json"
+        return f"{self.ds.analysis_dir}/{self.scorer}/pooled_results_std_ddg.json"
 
     @property
     def stratified_json_path(self) -> str:
-        return f"{self.ds.analysis_dir}/{self.scorer}/stratified_results.json"
+        return f"{self.ds.analysis_dir}/{self.scorer}/stratified_results_std_ddg.json"
 
     @property
     def per_protein_tsv_path(self) -> str:
-        return f"{self.ds.analysis_dir}/{self.scorer}/per_protein_correlations.tsv"
+        return f"{self.ds.analysis_dir}/{self.scorer}/per_protein_correlations_std_ddg.tsv"
 
     @property
     def multi_ddg_json_path(self) -> str:

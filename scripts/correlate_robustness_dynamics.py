@@ -148,6 +148,42 @@ def load_robustness_global(robustness_dir: str, scorer: str, protein_id: str
     return data.get("global_metrics")
 
 
+def load_conservation(protein_dir: str) -> Optional[pd.DataFrame]:
+    """Load per-residue evolutionary conservation scores.
+
+    Looks for a ConSurf-style TSV file (*_conservation.tsv or *_consurf.tsv)
+    in the protein directory.  Expected columns include a numeric conservation
+    score (e.g. 'conservation_score', 'consurf_score', or simply 'score').
+    ConSurf scores range 1-9 (9 = most conserved).
+
+    Returns DataFrame with columns: position, conservation.
+    """
+    # Try several naming conventions
+    for suffix in ("_conservation.tsv", "_consurf.tsv", "_ConSurf.tsv"):
+        df = load_atlas_tsv(protein_dir, suffix)
+        if df is not None:
+            break
+    if df is None:
+        return None
+
+    # Find the conservation score column
+    score_cols = [c for c in df.columns
+                  if any(kw in c.lower()
+                         for kw in ("conservation", "consurf", "score"))]
+    if not score_cols:
+        # Fall back to first numeric column
+        numeric = [c for c in df.columns
+                   if df[c].dtype in (np.float64, np.float32, float, int, np.int64)]
+        score_cols = numeric[-1:] if numeric else []
+    if not score_cols:
+        return None
+
+    result = pd.DataFrame()
+    result["position"] = range(1, len(df) + 1)
+    result["conservation"] = pd.to_numeric(df[score_cols[0]], errors="coerce").values
+    return result
+
+
 # ==========================================================================
 # PDB PREPROCESSING
 # ==========================================================================
@@ -365,6 +401,7 @@ class PerProteinResult:
     rho_frac_neutral_rmsf: float = np.nan    # fraction of neutral mutations (|ddG| < 0.5)
     rho_std_ddg_rmsf: float = np.nan         # std of ddG (landscape ruggedness)
     rho_max_ddg_rmsf: float = np.nan         # worst-case mutation effect
+    rho_mean_abs_ddg_rmsf: float = np.nan    # mean |DDG| per residue
 
     # pLDDT vs RMSF (baseline)
     rho_plddt_rmsf: float = np.nan
@@ -438,6 +475,28 @@ class PerProteinResult:
     r2_bfactor_joint_sasa: float = np.nan
     delta_r2_bfactor_over_sasa: float = np.nan
 
+    # === CONSERVATION AS COVARIATE ===
+    # Conservation vs dynamics (baseline)
+    rho_conservation_rmsf: float = np.nan
+    r2_conservation_rmsf: float = np.nan
+    rho_conservation_bfactor: float = np.nan
+    r2_conservation_bfactor: float = np.nan
+
+    # Robustness vs Conservation (collinearity check)
+    rho_robustness_conservation: float = np.nan
+
+    # Partial: robustness vs RMSF | conservation
+    rho_robustness_rmsf_partial_conservation: float = np.nan
+    # Partial: robustness vs B-factor | conservation
+    rho_robustness_bfactor_partial_conservation: float = np.nan
+
+    # Multiple regression: RMSF ~ robustness + conservation
+    r2_joint_conservation: float = np.nan
+    delta_r2_over_conservation: float = np.nan
+    # Multiple regression: B-factor ~ robustness + conservation
+    r2_bfactor_joint_conservation: float = np.nan
+    delta_r2_bfactor_over_conservation: float = np.nan
+
     # Global robustness metrics
     global_mean_abs_ddg: float = np.nan
     global_mean_ddg: float = np.nan
@@ -454,6 +513,7 @@ def correlate_single_protein(
     global_metrics: Optional[Dict],
     scorer: str,
     sasa_df: Optional[pd.DataFrame] = None,
+    conservation_df: Optional[pd.DataFrame] = None,
     rob_col: str = "mean_abs_ddg",
 ) -> Optional[PerProteinResult]:
     """Compute all correlations for a single protein."""
@@ -482,6 +542,12 @@ def correlate_single_protein(
     else:
         merged["sasa"] = np.nan
 
+    if conservation_df is not None:
+        merged = merged.merge(conservation_df[["position", "conservation"]],
+                              on="position", how="left")
+    else:
+        merged["conservation"] = np.nan
+
     # Drop rows with NaN in core columns
     core = merged.dropna(subset=[rob_col, "rmsf_avg"])
     if len(core) < 10:  # too few residues
@@ -506,7 +572,8 @@ def correlate_single_protein(
     for col, attr in [("frac_destabilizing", "rho_frac_destab_rmsf"),
                        ("frac_neutral", "rho_frac_neutral_rmsf"),
                        ("std_ddg", "rho_std_ddg_rmsf"),
-                       ("max_ddg", "rho_max_ddg_rmsf")]:
+                       ("max_ddg", "rho_max_ddg_rmsf"),
+                       ("mean_abs_ddg", "rho_mean_abs_ddg_rmsf")]:
         if col in core.columns:
             valid_alt = core.dropna(subset=[col])
             if len(valid_alt) >= 10:
@@ -613,6 +680,43 @@ def correlate_single_protein(
                 result.r2_joint_multi_rob = r2_multi
                 result.delta_r2_multi_rob_over_plddt = r2_multi - r2_plddt_only
 
+    # --- Conservation vs RMSF and robustness | conservation ---
+    cons_valid = core.dropna(subset=["conservation"])
+    if len(cons_valid) >= 10:
+        from sklearn.linear_model import LinearRegression
+
+        # Conservation vs RMSF baseline
+        rho, _ = scipy_stats.spearmanr(cons_valid["conservation"],
+                                       cons_valid["rmsf_avg"])
+        result.rho_conservation_rmsf = rho
+        r, _ = scipy_stats.pearsonr(cons_valid["conservation"],
+                                    cons_valid["rmsf_avg"])
+        result.r2_conservation_rmsf = r ** 2
+
+        # Robustness vs Conservation (collinearity check)
+        rho, _ = scipy_stats.spearmanr(cons_valid[rob_col],
+                                       cons_valid["conservation"])
+        result.rho_robustness_conservation = rho
+
+        # Partial: robustness vs RMSF | conservation
+        pr, _ = partial_spearman(
+            cons_valid[rob_col].values,
+            cons_valid["rmsf_avg"].values,
+            cons_valid["conservation"].values,
+        )
+        result.rho_robustness_rmsf_partial_conservation = pr
+
+        # Multiple regression: RMSF ~ robustness + conservation
+        y_c = cons_valid["rmsf_avg"].values
+        X_cons_only = cons_valid[["conservation"]].values
+        X_rob_cons = cons_valid[[rob_col, "conservation"]].values
+        r2_cons_only = LinearRegression().fit(X_cons_only, y_c).score(
+            X_cons_only, y_c)
+        r2_rob_cons = LinearRegression().fit(X_rob_cons, y_c).score(
+            X_rob_cons, y_c)
+        result.r2_joint_conservation = r2_rob_cons
+        result.delta_r2_over_conservation = r2_rob_cons - r2_cons_only
+
     # =====================================================================
     # B-FACTOR AS TARGET (predicting experimental dynamics)
     # =====================================================================
@@ -682,6 +786,34 @@ def correlate_single_protein(
             )
             result.r2_bfactor_joint_sasa = r2_j
             result.delta_r2_bfactor_over_sasa = dr2
+
+        # --- Conservation vs B-factor ---
+        bf_cons = bfac_target.dropna(subset=["conservation"])
+        if len(bf_cons) >= 10:
+            rho, _ = scipy_stats.spearmanr(bf_cons["conservation"],
+                                           bf_cons["bfactor"])
+            result.rho_conservation_bfactor = rho
+            r, _ = scipy_stats.pearsonr(bf_cons["conservation"],
+                                        bf_cons["bfactor"])
+            result.r2_conservation_bfactor = r ** 2
+
+            # Partial: robustness vs B-factor | conservation
+            pr, _ = partial_spearman(
+                bf_cons[rob_col].values,
+                bf_cons["bfactor"].values,
+                bf_cons["conservation"].values,
+            )
+            result.rho_robustness_bfactor_partial_conservation = pr
+
+            # Regression: B-factor ~ robustness + conservation
+            y_bf = bf_cons["bfactor"].values
+            _, r2_j, dr2 = regression_delta_r2(
+                bf_cons[["conservation"]].values,
+                bf_cons[[rob_col, "conservation"]].values,
+                y_bf,
+            )
+            result.r2_bfactor_joint_conservation = r2_j
+            result.delta_r2_bfactor_over_conservation = dr2
 
     # --- Global metrics ---
     if global_metrics:
@@ -771,6 +903,24 @@ class PooledResult:
     median_rho_robustness_bfactor_partial_sasa: float = np.nan
     median_rho_robustness_bfactor_partial_plddt: float = np.nan
 
+    # === CONSERVATION AS COVARIATE (pooled) ===
+    pooled_rho_conservation_rmsf: float = np.nan
+    pooled_r2_conservation_rmsf: float = np.nan
+    pooled_rho_conservation_bfactor: float = np.nan
+    pooled_r2_conservation_bfactor: float = np.nan
+    pooled_rho_robustness_conservation: float = np.nan
+    pooled_rho_robustness_rmsf_partial_conservation: float = np.nan
+    pooled_rho_robustness_bfactor_partial_conservation: float = np.nan
+    pooled_r2_joint_conservation: float = np.nan
+    pooled_delta_r2_over_conservation: float = np.nan
+    pooled_r2_bfactor_joint_conservation: float = np.nan
+    pooled_delta_r2_bfactor_over_conservation: float = np.nan
+    median_rho_conservation_rmsf: float = np.nan
+    median_rho_conservation_bfactor: float = np.nan
+    median_rho_robustness_conservation: float = np.nan
+    median_rho_robustness_rmsf_partial_conservation: float = np.nan
+    median_rho_robustness_bfactor_partial_conservation: float = np.nan
+
     # Fraction of proteins where robustness beats pLDDT
     frac_robustness_beats_plddt: float = np.nan
     frac_robustness_beats_plddt_bfactor: float = np.nan  # for B-factor target
@@ -838,6 +988,13 @@ def run_pooled_analysis(
     result.median_rho_robustness_bfactor_partial_sasa = _median_attr("rho_robustness_bfactor_partial_sasa")
     result.median_rho_robustness_bfactor_partial_plddt = _median_attr("rho_robustness_bfactor_partial_plddt")
 
+    # Conservation per-protein medians
+    result.median_rho_conservation_rmsf = _median_attr("rho_conservation_rmsf")
+    result.median_rho_conservation_bfactor = _median_attr("rho_conservation_bfactor")
+    result.median_rho_robustness_conservation = _median_attr("rho_robustness_conservation")
+    result.median_rho_robustness_rmsf_partial_conservation = _median_attr("rho_robustness_rmsf_partial_conservation")
+    result.median_rho_robustness_bfactor_partial_conservation = _median_attr("rho_robustness_bfactor_partial_conservation")
+
     # Fraction where |rho_robustness| > |rho_plddt| (RMSF target)
     both = [(r.rho_robustness_rmsf, r.rho_plddt_rmsf) for r in per_protein_results
             if not np.isnan(r.rho_robustness_rmsf) and not np.isnan(r.rho_plddt_rmsf)]
@@ -868,7 +1025,7 @@ def run_pooled_analysis(
                 if resp_col in df.columns:
                     df[resp_col] = np.log1p(np.clip(df[resp_col].values, 0, None))
         # Z-score within protein to remove protein-level differences
-        for col in [rob_col, "rmsf_avg", "plddt", "sasa", "bfactor"]:
+        for col in [rob_col, "rmsf_avg", "plddt", "sasa", "bfactor", "conservation"]:
             if col in df.columns:
                 mu, sigma = df[col].mean(), df[col].std()
                 if sigma > 0:
@@ -1056,6 +1213,77 @@ def run_pooled_analysis(
                 )
                 result.pooled_r2_bfactor_joint_sasa = r2_j
                 result.pooled_delta_r2_bfactor_over_sasa = dr2
+
+        # Conservation → B-factor
+        if "conservation_z" in pooled.columns:
+            valid_cb = pooled.dropna(subset=["conservation_z", "bfactor_z"])
+            if len(valid_cb) >= 20:
+                rho, _ = scipy_stats.spearmanr(valid_cb["conservation_z"],
+                                               valid_cb["bfactor_z"])
+                result.pooled_rho_conservation_bfactor = rho
+                r, _ = scipy_stats.pearsonr(valid_cb["conservation_z"],
+                                            valid_cb["bfactor_z"])
+                result.pooled_r2_conservation_bfactor = r ** 2
+
+            # Partial: robustness vs B-factor | conservation
+            valid_rbc = pooled.dropna(subset=[rob_col_z, "bfactor_z",
+                                              "conservation_z"])
+            if len(valid_rbc) >= 20:
+                pr, _ = partial_spearman(
+                    valid_rbc[rob_col_z].values,
+                    valid_rbc["bfactor_z"].values,
+                    valid_rbc["conservation_z"].values,
+                )
+                result.pooled_rho_robustness_bfactor_partial_conservation = pr
+
+                # Regression: B-factor ~ robustness + conservation
+                _, r2_j, dr2 = regression_delta_r2(
+                    valid_rbc[["conservation_z"]].values,
+                    valid_rbc[[rob_col_z, "conservation_z"]].values,
+                    valid_rbc["bfactor_z"].values,
+                )
+                result.pooled_r2_bfactor_joint_conservation = r2_j
+                result.pooled_delta_r2_bfactor_over_conservation = dr2
+
+    # =================================================================
+    # POOLED CONSERVATION ANALYSIS (RMSF target)
+    # =================================================================
+    if "conservation_z" in pooled.columns:
+        valid_cons = pooled.dropna(subset=["conservation_z", "rmsf_avg_z"])
+        if len(valid_cons) >= 20:
+            rho, _ = scipy_stats.spearmanr(valid_cons["conservation_z"],
+                                           valid_cons["rmsf_avg_z"])
+            result.pooled_rho_conservation_rmsf = rho
+            r, _ = scipy_stats.pearsonr(valid_cons["conservation_z"],
+                                        valid_cons["rmsf_avg_z"])
+            result.pooled_r2_conservation_rmsf = r ** 2
+
+        # Robustness vs Conservation (collinearity)
+        valid_rc = pooled.dropna(subset=[rob_col_z, "conservation_z"])
+        if len(valid_rc) >= 20:
+            rho, _ = scipy_stats.spearmanr(valid_rc[rob_col_z],
+                                           valid_rc["conservation_z"])
+            result.pooled_rho_robustness_conservation = rho
+
+        # Partial: robustness vs RMSF | conservation
+        valid_rrc = pooled.dropna(subset=[rob_col_z, "rmsf_avg_z",
+                                          "conservation_z"])
+        if len(valid_rrc) >= 20:
+            pr, _ = partial_spearman(
+                valid_rrc[rob_col_z].values,
+                valid_rrc["rmsf_avg_z"].values,
+                valid_rrc["conservation_z"].values,
+            )
+            result.pooled_rho_robustness_rmsf_partial_conservation = pr
+
+            # Regression: RMSF ~ robustness + conservation
+            _, r2_j, dr2 = regression_delta_r2(
+                valid_rrc[["conservation_z"]].values,
+                valid_rrc[[rob_col_z, "conservation_z"]].values,
+                valid_rrc["rmsf_avg_z"].values,
+            )
+            result.pooled_r2_joint_conservation = r2_j
+            result.pooled_delta_r2_over_conservation = dr2
 
     return result
 
@@ -1460,10 +1688,13 @@ def run_analysis_for_scorer(
                 except Exception as e:
                     print(f"  Warning: SASA computation failed for {pid}: {e}")
 
+        # Load conservation scores (if available)
+        conservation_df = load_conservation(protein_dir)
+
         # Correlate
         result = correlate_single_protein(
             pid, rob_df, rmsf_df, plddt_df, bfactor_df, global_metrics, scorer,
-            sasa_df=sasa_df, rob_col=rob_col,
+            sasa_df=sasa_df, conservation_df=conservation_df, rob_col=rob_col,
         )
         if result is None:
             n_skip_too_short += 1
@@ -1485,6 +1716,9 @@ def run_analysis_for_scorer(
             merged = merged.merge(bfactor_df[["position", "bfactor"]], on="position", how="left")
         if sasa_df is not None:
             merged = merged.merge(sasa_df[["position", "sasa"]], on="position", how="left")
+        if conservation_df is not None:
+            merged = merged.merge(conservation_df[["position", "conservation"]],
+                                  on="position", how="left")
 
         # Secondary structure and burial (if enabled)
         if use_dssp:

@@ -272,8 +272,11 @@ def generate_fig2(results: dict, output_dir: Path):
 
         # 2D density (hexbin)
         mask = (y >= y_floor) & (y <= y_clip)
-        ax_main.hexbin(x[mask], y[mask], gridsize=40, cmap="Blues",
-                        mincnt=1, linewidths=0.2)
+        hb = ax_main.hexbin(x[mask], y[mask], gridsize=40, cmap="Blues",
+                             mincnt=1, linewidths=0.2)
+        cb = fig.colorbar(hb, ax=ax_right, pad=0.1, shrink=0.8)
+        cb.set_label("Count", fontsize=8)
+        cb.ax.tick_params(labelsize=7)
         ax_main.set_xlabel(r"$\operatorname{std}(\Delta\Delta G)$ (z-scored)")
         ax_main.set_ylabel(f"{target_label} (z-scored)")
         ax_main.set_ylim(y_floor, y_clip)
@@ -306,67 +309,80 @@ def generate_fig2(results: dict, output_dir: Path):
 # ============================================================================
 
 def generate_fig3(results: dict, output_dir: Path):
-    """Model comparison bar chart across all dataset-target combos."""
-    n_panels = len(FIG3_PANELS)
-    ncols = min(n_panels, 4)
-    nrows = (n_panels + ncols - 1) // ncols
-    fig, axes = plt.subplots(nrows, ncols, figsize=(7 * ncols, 6 * nrows),
-                              sharey=True, squeeze=False)
+    """Model comparison: 2 panels (RMSF, B-factor) with grouped bars per dataset."""
+    fig, axes = plt.subplots(1, 2, figsize=(16, 7))
 
     model_display = {
-        "ols_mean_abs_ddg": "mean|DDG|",
+        "ols_std_ddg": r"std($\Delta\Delta G$)",
+        "ols_mean_abs_ddg": r"mean|$\Delta\Delta G$|",
         "ols_plddt": "pLDDT",
         "ols_sasa": "SASA",
-        "ols_mean_plddt": "std+pLDDT",
-        "ridge_20ddg": "20 DDG",
+        "ols_std_plddt": "std+pLDDT",
+        "ridge_20ddg": r"20 $\Delta\Delta G$",
         "ridge_nonlinear_only": "4 NL",
         "ridge_20ddg_nonlinear": "20+NL",
         "ridge_20ddg_plddt": "20+pLDDT",
         "ridge_20ddg_nonlinear_plddt": "20+NL+pLDDT",
     }
 
-    for panel_idx, (ds_name, target) in enumerate(FIG3_PANELS):
-        row, col = divmod(panel_idx, ncols)
-        ax = axes[row, col]
-        ds = DATASETS[ds_name]
-        target_label = "RMSF" if target == "rmsf" else "B-factor"
+    # Panel configs: (target, list of (dataset, color, label))
+    panel_configs = [
+        ("RMSF", "rmsf", [
+            ("atlas", "tab:blue", "ATLAS"),
+            ("bbflow", "tab:orange", "BBFlow"),
+        ]),
+        ("B-factor", "bfactor", [
+            ("atlas", "tab:blue", "ATLAS"),
+            ("pdb_designs", "tab:green", "PDB designs"),
+        ]),
+    ]
 
-        run_key = f"{ds_name}_thermompnn_{target}"
-        run = results.get("runs", {}).get(run_key, {})
-        multi = run.get("multi_ddg", {})
-        models = multi.get("models", {})
+    for panel_idx, (title, target, dataset_list) in enumerate(panel_configs):
+        ax = axes[panel_idx]
 
-        if not models:
-            ax.set_title(f"{ds.display_name} {target_label}\n(no data)")
-            ax.text(0.5, 0.5, "No multi-DDG data", transform=ax.transAxes,
-                    ha="center", va="center", fontsize=12, color="gray")
+        # Collect model names from all datasets in this panel
+        all_model_names = []
+        for mname in model_display:
+            for ds_name, _, _ in dataset_list:
+                run_key = f"{ds_name}_thermompnn_{target}"
+                run = results.get("runs", {}).get(run_key, {})
+                models = run.get("multi_ddg", {}).get("models", {})
+                if mname in models:
+                    if mname not in all_model_names:
+                        all_model_names.append(mname)
+                    break
+
+        if not all_model_names:
+            ax.set_title(f"{title}\n(no data)")
             continue
 
-        names = []
-        r2_vals = []
-        r2_stds = []
+        n_models = len(all_model_names)
+        n_datasets = len(dataset_list)
+        bar_width = 0.8 / n_datasets
+        x = np.arange(n_models)
 
-        for mname in model_display:
-            if mname in models:
-                names.append(model_display[mname])
-                r2_vals.append(models[mname].get("cv_r2_mean", 0) or 0)
-                r2_stds.append(models[mname].get("cv_r2_std", 0) or 0)
+        for ds_idx, (ds_name, color, label) in enumerate(dataset_list):
+            run_key = f"{ds_name}_thermompnn_{target}"
+            run = results.get("runs", {}).get(run_key, {})
+            models = run.get("multi_ddg", {}).get("models", {})
 
-        x = np.arange(len(names))
-        ax.bar(x, r2_vals, 0.6, yerr=r2_stds, label=target_label,
-               color="tab:blue" if target == "rmsf" else "tab:orange",
-               alpha=0.8, capsize=3)
+            r2_vals = []
+            r2_stds = []
+            for mname in all_model_names:
+                m = models.get(mname, {})
+                r2_vals.append(m.get("cv_r2_mean", 0) or 0)
+                r2_stds.append(m.get("cv_r2_std", 0) or 0)
 
+            offset = (ds_idx - (n_datasets - 1) / 2) * bar_width
+            ax.bar(x + offset, r2_vals, bar_width, yerr=r2_stds,
+                   color=color, alpha=0.8, capsize=2, label=label)
+
+        display_names = [model_display[m] for m in all_model_names]
         ax.set_xticks(x)
-        ax.set_xticklabels(names, rotation=45, ha="right", fontsize=9)
+        ax.set_xticklabels(display_names, rotation=45, ha="right", fontsize=9)
         ax.set_ylabel("CV $R^2$")
-        ax.set_title(f"{ds.display_name} {target_label}",
-                     fontsize=12, fontweight="bold")
-
-    # Hide unused axes
-    for idx in range(n_panels, nrows * ncols):
-        row, col = divmod(idx, ncols)
-        axes[row, col].set_visible(False)
+        ax.set_title(title, fontsize=13, fontweight="bold")
+        ax.legend(fontsize=10)
 
     plt.tight_layout()
     for ext in ["pdf", "png"]:
