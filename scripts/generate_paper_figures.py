@@ -385,9 +385,7 @@ def generate_fig3(results: dict, output_dir: Path):
         ax.set_ylabel("CV $R^2$")
         ax.set_title(title, fontweight="bold")
 
-        # Legend only on first panel, no frame
-        if panel_idx == 0:
-            ax.legend(frameon=False)
+        ax.legend(frameon=False)
 
     plt.tight_layout()
     for ext in ["pdf", "png"]:
@@ -416,7 +414,7 @@ def generate_fig4(results: dict, output_dir: Path):
         ]),
         ("B-factor", [
             ("atlas_thermompnn_bfactor", "tab:blue", "ATLAS"),
-            ("pdb_designs_thermompnn_bfactor", "tab:orange", "PDB designs"),
+            ("pdb_designs_thermompnn_bfactor", "tab:green", "PDB designs"),
         ]),
     ]
 
@@ -451,9 +449,7 @@ def generate_fig4(results: dict, output_dir: Path):
         ax.set_title(title, fontweight="bold")
         ax.axhline(0, color="gray", linewidth=0.5)
 
-        # Legend only on first panel, no frame, upper left to avoid bars
-        if panel_idx == 0:
-            ax.legend(frameon=False, loc="upper left")
+        ax.legend(frameon=False, loc="upper left")
 
     plt.tight_layout()
     for ext in ["pdf", "png"]:

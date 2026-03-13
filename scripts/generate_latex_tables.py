@@ -70,6 +70,37 @@ def _highlight_best_in_row(cells, higher_is_better=True, use_abs=False):
     return result
 
 
+def _highlight_best_in_columns(grid):
+    """Bold the best |rho| within each column across rows.
+
+    grid: list of (row_label, [(cell_str, raw_value), ...])
+    Returns list of (row_label, [cell_str, ...]) with best per column bolded.
+    """
+    n_rows = len(grid)
+    if n_rows == 0:
+        return []
+    n_cols = len(grid[0][1])
+    # Find best row index for each column
+    best_per_col = {}
+    for col in range(n_cols):
+        valid = [(row_idx, abs(grid[row_idx][1][col][1]))
+                 for row_idx in range(n_rows)
+                 if grid[row_idx][1][col][1] is not None]
+        if valid:
+            best_per_col[col] = max(valid, key=lambda x: x[1])[0]
+    # Build output with bolding
+    result = []
+    for row_idx, (label, cells) in enumerate(grid):
+        out_cells = []
+        for col, (fmt_str, _) in enumerate(cells):
+            if col in best_per_col and best_per_col[col] == row_idx and fmt_str != "---":
+                out_cells.append(_bold(fmt_str))
+            else:
+                out_cells.append(fmt_str)
+        result.append((label, out_cells))
+    return result
+
+
 def _get_run(results, dataset, scorer, target):
     """Get a run from the unified results, or empty dict."""
     key = f"{dataset}_{scorer}_{target}"
@@ -295,11 +326,10 @@ def generate_table2(results: dict) -> str:
     lines.append(r"\caption{Stratified pooled Spearman $\rho$ between ThermoMPNN")
     lines.append(r"$\operatorname{std}(\Delta\Delta G)$ and dynamics target,")
     lines.append(r"grouped by secondary structure (DSSP classification: $\alpha$-helix H,")
-    lines.append(r"$\beta$-sheet E, coil C) and by burial class (SASA-based terciles:")
-    lines.append(r"core $<$ 20\%, boundary 20--50\%, surface $>$ 50\% relative")
-    lines.append(r"solvent accessibility).")
+    lines.append(r"$\beta$-sheet E, coil C) and by burial class based on relative solvent accessibility (RSA):")
+    lines.append(r"core (RSA $<$ 20\%), boundary (20--50\%), surface ($>$ 50\%).")
     lines.append(r"pLDDT values shown in parentheses where available.")
-    lines.append(r"Best $|\rho|$ within each structural category is shown in \textbf{bold}.}")
+    lines.append(r"Best $|\rho|$ within each column (across structural classes) is shown in \textbf{bold}.}")
     lines.append(r"\label{tab:stratified}")
     lines.append(r"\small")
     lines.append(r"\begin{tabular}{@{}l cccc@{}}")
@@ -321,6 +351,8 @@ def generate_table2(results: dict) -> str:
     # Secondary structure
     lines.append(r"\multicolumn{5}{l}{\textit{Secondary structure}} \\")
     ss_labels = {"H": r"$\alpha$-helix", "E": r"$\beta$-sheet", "C": "Coil"}
+    # Collect all rows first, then bold best |rho| within each column
+    ss_grid = []  # list of (label, [(cell_str, rho_rob), ...])
     for ss in TABLE2_SS_STRATA:
         row_cells = []
         for ds_name, target in TABLE1_COLUMNS:
@@ -334,15 +366,16 @@ def generate_table2(results: dict) -> str:
             else:
                 cell = "---"
             row_cells.append((cell, rho_rob))
-        # Highlight best |rho| across columns for this stratum
-        highlighted = _highlight_best_in_row(row_cells, higher_is_better=True, use_abs=True)
-        row = [r"\quad " + ss_labels[ss]] + highlighted
-        lines.append(" & ".join(row) + r" \\")
+        ss_grid.append((r"\quad " + ss_labels[ss], row_cells))
+    # Bold the best |rho| within each column (across strata)
+    for row_label, row_cells in _highlight_best_in_columns(ss_grid):
+        lines.append(" & ".join([row_label] + row_cells) + r" \\")
     lines.append(r"\midrule")
 
     # Burial
-    lines.append(r"\multicolumn{5}{l}{\textit{Burial (SASA terciles)}} \\")
+    lines.append(r"\multicolumn{5}{l}{\textit{Burial (RSA cutoffs)}} \\")
     burial_labels = {"core": "Core", "boundary": "Boundary", "surface": "Surface"}
+    burial_grid = []
     for burial in TABLE2_BURIAL_STRATA:
         row_cells = []
         for ds_name, target in TABLE1_COLUMNS:
@@ -356,9 +389,9 @@ def generate_table2(results: dict) -> str:
             else:
                 cell = "---"
             row_cells.append((cell, rho_rob))
-        highlighted = _highlight_best_in_row(row_cells, higher_is_better=True, use_abs=True)
-        row = [r"\quad " + burial_labels[burial]] + highlighted
-        lines.append(" & ".join(row) + r" \\")
+        burial_grid.append((r"\quad " + burial_labels[burial], row_cells))
+    for row_label, row_cells in _highlight_best_in_columns(burial_grid):
+        lines.append(" & ".join([row_label] + row_cells) + r" \\")
 
     lines.append(r"\bottomrule")
     lines.append(r"\end{tabular}")
