@@ -1,34 +1,53 @@
 #!/usr/bin/env python3
+"""Find well-known proteins in ATLAS dataset by searching protein names/titles."""
 import pandas as pd
 
 df = pd.read_csv('/sci/labs/orzuk/orzuk/projects/ProteinStability/data/atlas_analysis/thermompnn/per_protein_correlations.tsv', sep='\t')
 
-classics = [
-    '1ubq', '1ubi', '2ci2', '1lz1', '1lyz', '3lzm', '2lzm', '1l58', '4lzt',
-    '1ake', '4ake', '2eck',
-    '1rx2', '1dfj', '3dfr', '1dyr',
-    '1cll', '1cdl', '1osa',
-    '2rn2', '1a2p', '1bni',
-    '1hiv', '1htg', '1aid',
-    '1a3n', '1hho', '2hhb',
-    '1mbo', '1myg', '1wla',
-    '1tim', '7tim', '1tph',
-    '3pga', '1pgk',
-    '1cyx', '1cwp', '2cpb',
-    '1stn', '1snc',
-    '1shf', '1ten', '3hhr',
-    '1pgb', '1pga', '2ptl',
-    '1crn', '1l2y',
-    '1e4e', '2e4e',
-]
+# First: just print all PDB IDs so we can grep for known ones
+pdb_ids = df['protein_id'].str.split('_').str[0].tolist()
 
-pdb_ids = df['protein_id'].str.split('_').str[0]
+# Search for common protein keywords in PDB IDs
+# Many classic proteins have multiple PDB entries; let's try broader patterns
+import os, glob
 
-print(f"{'protein_id':12s} {'L':>4s}  {'rho_rmsf':>9s}  {'rho_bfac':>9s}  {'plddt_rmsf':>11s}  {'plddt_bfac':>11s}")
+# Approach 1: Look for proteins with good rho AND reasonable size, print PDB IDs
+# so we can manually identify them
+good = df[(df['seq_length'] >= 80) & (df['seq_length'] <= 300) &
+          (df['rho_std_ddg_rmsf'].abs() > 0.6) &
+          (df['rho_robustness_bfactor_target'].abs() > 0.4)]
+good = good.sort_values('rho_std_ddg_rmsf')
+
+print(f"Found {len(good)} proteins with |rho_rmsf|>0.6, |rho_bfac|>0.4, L=80-300")
+print(f"\n{'protein_id':12s} {'L':>4s}  {'rho_rmsf':>9s}  {'rho_bfac':>9s}  {'plddt_rmsf':>11s}  {'plddt_bfac':>11s}")
 print("-" * 70)
 
-for c in classics:
-    matches = df[pdb_ids == c]
-    if len(matches) > 0:
-        for _, row in matches.iterrows():
-            print(f"{row['protein_id']:12s} {row['seq_length']:4d}  {row['rho_std_ddg_rmsf']:9.3f}  {row['rho_robustness_bfactor_target']:9.3f}  {row['rho_plddt_rmsf']:11.3f}  {row['rho_plddt_bfactor']:11.3f}")
+for _, row in good.head(50).iterrows():
+    print(f"{row['protein_id']:12s} {row['seq_length']:4d}  {row['rho_std_ddg_rmsf']:9.3f}  {row['rho_robustness_bfactor_target']:9.3f}  {row['rho_plddt_rmsf']:11.3f}  {row['rho_plddt_bfactor']:11.3f}")
+
+# Approach 2: Try to read PDB titles from ATLAS directory
+atlas_dir = '/sci/labs/orzuk/orzuk/projects/ProteinStability/data/atlas'
+print("\n\n=== Checking PDB titles for top candidates ===")
+for _, row in good.head(20).iterrows():
+    pid = row['protein_id']
+    pdb_code = pid.split('_')[0]
+    # Try to find and read the PDB file header
+    pdb_patterns = [
+        os.path.join(atlas_dir, pdb_code, f"{pdb_code}*.pdb"),
+        os.path.join(atlas_dir, pid, f"*.pdb"),
+        os.path.join(atlas_dir, pdb_code, "*.pdb"),
+    ]
+    title = "?"
+    for pat in pdb_patterns:
+        files = glob.glob(pat)
+        if files:
+            try:
+                with open(files[0]) as f:
+                    for line in f:
+                        if line.startswith("TITLE"):
+                            title = line[10:].strip()
+                            break
+            except:
+                pass
+            break
+    print(f"{pid:12s}  {title}")
