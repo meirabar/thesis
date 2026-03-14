@@ -236,12 +236,12 @@ SLURM_DEFAULTS = {
         "time": "02:00:00",
         "mem": "16G",
         "cpus": 4,
-        "partition": "galileo",
+        "partition": "glacier",
     },
     "multi_ddg": {
         "time": "04:00:00",
         "mem": "32G",
         "cpus": 4,
-        "partition": "galileo",
+        "partition": "glacier",
     },
 }
