@@ -1,5 +1,5 @@
 #!/bin/bash
-# Rerun multi-DDG regression for all datasets (to pick up ols_mean_ddg model)
+# Rerun multi-DDG regression for all 5 datasets (within-protein z-scoring fix)
 # Then collect results and regenerate figures.
 set -e
 
@@ -58,6 +58,18 @@ python scripts/multi_ddg_regression.py \\
     --robustness_dir $PDB_DESIGNS_ROBUSTNESS \\
     --scorer thermompnn \\
     --output_dir $PDB_DESIGNS_ANALYSIS \\
+    --target bfactor
+
+# RCI-S2 (NMR) B-factor
+echo "--- RCI-S2 NMR ---"
+RCI_OUTPUT_DIR=$PROJECT_DIR/data/rci_s2_processed
+RCI_ROBUSTNESS_DIR=$PROJECT_DIR/data/rci_s2_robustness
+RCI_ANALYSIS_DIR=$PROJECT_DIR/data/rci_s2_analysis
+python scripts/multi_ddg_regression.py \\
+    --atlas_dir \$RCI_OUTPUT_DIR \\
+    --robustness_dir \$RCI_ROBUSTNESS_DIR \\
+    --scorer thermompnn \\
+    --output_dir \$RCI_ANALYSIS_DIR \\
     --target bfactor
 
 echo "=== All multi-DDG done ==="

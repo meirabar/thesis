@@ -259,16 +259,50 @@ def build_dataset(
             skipped["too_short"] += 1
             continue
 
+        # Compute nonlinear summary features from RAW DDG values
+        # (before z-scoring, so std/mean/max/min are meaningful).
+        ddg_raw = ddg_20[valid]
+        ddg_masked = ddg_raw.copy()
+        ddg_masked[ddg_masked == 0] = np.nan
+        nl_std = np.nanstd(ddg_masked, axis=1)
+        nl_mean_abs = np.nanmean(np.abs(ddg_masked), axis=1)
+        nl_max_abs = np.nanmax(np.abs(ddg_masked), axis=1)
+        nl_min = np.nanmin(ddg_masked, axis=1)
+        nonlinear_4_raw = np.column_stack([nl_std, nl_mean_abs, nl_max_abs, nl_min])
+
+        # Within-protein z-scoring of ALL features and target.
+        # This matches the correlation analysis and removes protein-level
+        # offsets so the regression captures residue-level signal only.
+        def _zscore(arr):
+            if arr is None:
+                return None
+            mu, sd = np.nanmean(arr), np.nanstd(arr)
+            if sd < 1e-10:
+                return arr - mu  # constant feature, will be ~0
+            return (arr - mu) / sd
+
+        def _zscore_cols(mat):
+            """Z-score each column of a 2D array within this protein."""
+            out = np.empty_like(mat, dtype=float)
+            for c in range(mat.shape[1]):
+                out[:, c] = _zscore(mat[:, c])
+            return out
+
+        ddg_valid = _zscore_cols(ddg_raw)
+        y_valid = _zscore(y[valid])
+        nonlinear_4 = _zscore_cols(nonlinear_4_raw)
+
         entry = {
             "protein_id": pid,
             "seq_length": L,
-            "ddg_20": ddg_20[valid],
-            "target": y[valid],
-            "plddt": plddt[valid] if plddt is not None else None,
-            "sasa": sasa[valid] if sasa is not None else None,
-            "mean_abs_ddg": mean_abs_ddg[valid] if mean_abs_ddg is not None else None,
-            "mean_ddg": mean_ddg[valid] if mean_ddg is not None else None,
-            "std_ddg": std_ddg[valid] if std_ddg is not None else None,
+            "ddg_20": ddg_valid,
+            "nonlinear_4": nonlinear_4,
+            "target": y_valid,
+            "plddt": _zscore(plddt[valid]) if plddt is not None else None,
+            "sasa": _zscore(sasa[valid]) if sasa is not None else None,
+            "mean_abs_ddg": _zscore(mean_abs_ddg[valid]) if mean_abs_ddg is not None else None,
+            "mean_ddg": _zscore(mean_ddg[valid]) if mean_ddg is not None else None,
+            "std_ddg": _zscore(std_ddg[valid]) if std_ddg is not None else None,
             "n_residues": int(n_valid),
         }
         dataset.append(entry)
@@ -306,23 +340,6 @@ def run_cv_regression(
     # Protein indices
     indices = np.arange(n)
 
-    # --- Helper: compute nonlinear summary features from DDG matrix ---
-    def ddg_nonlinear_features(ddg_20):
-        """Compute nonlinear summary statistics from L x 20 DDG matrix.
-
-        Returns L x 4 array: [std_ddg, mean_abs_ddg, max_abs_ddg, min_ddg].
-        These capture landscape shape properties (variance, extremes) that
-        a linear combination of the 20 raw DDG values cannot represent.
-        """
-        # Mask out the self-mutation (0 values) for correct statistics
-        ddg_masked = ddg_20.copy()
-        ddg_masked[ddg_masked == 0] = np.nan
-        std_ddg = np.nanstd(ddg_masked, axis=1)
-        mean_abs = np.nanmean(np.abs(ddg_masked), axis=1)
-        max_abs = np.nanmax(np.abs(ddg_masked), axis=1)
-        min_ddg = np.nanmin(ddg_masked, axis=1)
-        return np.column_stack([std_ddg, mean_abs, max_abs, min_ddg])
-
     nonlinear_names = ["std_ddg", "mean|DDG|", "max|DDG|", "min_ddg"]
 
     # --- Model definitions: name -> (feature_extractor, regularized) ---
@@ -330,23 +347,30 @@ def run_cv_regression(
         return entry["ddg_20"]
 
     def extract_20ddg_nonlinear(entry):
-        """20 raw DDG + 4 nonlinear summary features = 24 features.
-        This hybrid model can capture both per-AA-specific effects AND
-        landscape shape (variance, extremes) that pure linear models miss.
+        """20 per-AA DDG + 4 nonlinear summary features = 24 features.
+        Uses pre-computed nonlinear features from the entry (already
+        z-scored within-protein during loading).
         """
-        nl = ddg_nonlinear_features(entry["ddg_20"])
+        nl = entry.get("nonlinear_4")
+        if nl is None:
+            return None
         return np.column_stack([entry["ddg_20"], nl])
 
     def extract_20ddg_nonlinear_plddt(entry):
         """24 DDG features + pLDDT = 25 features."""
         if entry["plddt"] is None:
             return None
-        nl = ddg_nonlinear_features(entry["ddg_20"])
+        nl = entry.get("nonlinear_4")
+        if nl is None:
+            return None
         return np.column_stack([entry["ddg_20"], nl, entry["plddt"]])
 
     def extract_nonlinear_only(entry):
         """4 nonlinear DDG summary features only (no per-AA detail)."""
-        return ddg_nonlinear_features(entry["ddg_20"])
+        nl = entry.get("nonlinear_4")
+        if nl is None:
+            return None
+        return nl
 
     def extract_20ddg_plddt(entry):
         if entry["plddt"] is None:
@@ -510,23 +534,12 @@ def run_cv_regression(
             X_test = np.vstack(X_test_parts)
             y_test = np.concatenate(y_test_parts)
 
-            # Z-score features and target using TRAIN statistics
-            X_mean = np.nanmean(X_train, axis=0)
-            X_std = np.nanstd(X_train, axis=0)
-            X_std[X_std < 1e-10] = 1.0
-            y_mean = np.mean(y_train)
-            y_std = np.std(y_train)
-            if y_std < 1e-10:
-                continue
-
-            X_train_z = (X_train - X_mean) / X_std
-            X_test_z = (X_test - X_mean) / X_std
-            y_train_z = (y_train - y_mean) / y_std
-            y_test_z = (y_test - y_mean) / y_std
-
-            # Replace any remaining NaN with 0
-            X_train_z = np.nan_to_num(X_train_z, nan=0.0)
-            X_test_z = np.nan_to_num(X_test_z, nan=0.0)
+            # Data is already z-scored within each protein during loading.
+            # Just replace any remaining NaN with 0.
+            X_train_z = np.nan_to_num(X_train, nan=0.0)
+            X_test_z = np.nan_to_num(X_test, nan=0.0)
+            y_train_z = y_train
+            y_test_z = y_test
 
             # Fit
             if use_ridge:
