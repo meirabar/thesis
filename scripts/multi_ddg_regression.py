@@ -168,6 +168,7 @@ class RegressionResult:
     # Feature importance (for multi-DDG model)
     feature_names: List[str] = None
     feature_coefs_mean: List[float] = None
+    feature_coefs_std: List[float] = None
 
 
 def build_dataset(
@@ -593,6 +594,7 @@ def run_cv_regression(
 
         if fold_coefs:
             res.feature_coefs_mean = [float(x) for x in np.mean(fold_coefs, axis=0)]
+            res.feature_coefs_std = [float(x) for x in np.std(fold_coefs, axis=0)]
 
         print(f"    CV R²: {res.cv_r2_mean:.4f} ± {res.cv_r2_std:.4f}")
         print(f"    CV rho: {res.cv_rho_mean:.4f} ± {res.cv_rho_std:.4f}")

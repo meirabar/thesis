@@ -307,12 +307,13 @@ def generate_fig2(results: dict, output_dir: Path):
 
 
 # ============================================================================
-# FIGURE 3: Multi-DDG model comparison (combined panels)
+# FIGURE 3 (merged): Model comparison (left) + Ridge coefficients (right)
+#   3 rows: RMSF, B-factor, NMR.  2 columns: CV R², coefficients.
 # ============================================================================
 
 def generate_fig3(results: dict, output_dir: Path):
-    """Model comparison: 2 panels (RMSF, B-factor) with grouped bars per dataset."""
-    fig, axes = plt.subplots(1, 2, figsize=(16, 7))
+    """3x2 merged figure: model CV R² (left) and 24-feature Ridge
+    coefficients with error bars (right), one row per target type."""
 
     model_display = {
         "ols_std_ddg": r"std($\Delta\Delta G$)",
@@ -327,8 +328,20 @@ def generate_fig3(results: dict, output_dir: Path):
         "ridge_20ddg_nonlinear_plddt": "20+NL+pLDDT",
     }
 
-    # Panel configs: (target, list of (dataset, color, label))
-    panel_configs = [
+    AA_ORDER = list("ACDEFGHIKLMNPQRSTVWY")
+    NONLINEAR_NAMES = ["std_ddg", "mean|DDG|", "max|DDG|", "min_ddg"]
+    NONLINEAR_LABELS = [
+        r"std($\Delta\Delta G$)",
+        r"mean|$\Delta\Delta G$|",
+        r"max|$\Delta\Delta G$|",
+        r"min($\Delta\Delta G$)",
+    ]
+    ALL_FEATURES = AA_ORDER + NONLINEAR_NAMES
+    ALL_LABELS = AA_ORDER + NONLINEAR_LABELS
+    COEF_MODEL = "ridge_20ddg_nonlinear"
+
+    # 3 rows: RMSF, B-factor, NMR
+    row_configs = [
         ("RMSF", "rmsf", [
             ("atlas", "tab:blue", "ATLAS"),
             ("bbflow", "tab:orange", "BBFlow"),
@@ -337,12 +350,18 @@ def generate_fig3(results: dict, output_dir: Path):
             ("atlas", "tab:blue", "ATLAS"),
             ("pdb_designs", "tab:green", "PDB designs"),
         ]),
+        (r"NMR ($1 - S^2_\mathrm{RCI}$)", "bfactor", [
+            ("rci_s2", "tab:purple", r"$S^2_\mathrm{RCI}$"),
+        ]),
     ]
 
-    for panel_idx, (title, target, dataset_list) in enumerate(panel_configs):
-        ax = axes[panel_idx]
+    fig, axes = plt.subplots(3, 2, figsize=(22, 18),
+                             gridspec_kw={"width_ratios": [1, 1.8]})
 
-        # Collect model names from all datasets in this panel
+    for row_idx, (title, target, dataset_list) in enumerate(row_configs):
+        # ---- Left: CV R² model comparison ----
+        ax_r2 = axes[row_idx, 0]
+
         all_model_names = []
         for mname in model_display:
             for ds_name, _, _ in dataset_list:
@@ -354,38 +373,78 @@ def generate_fig3(results: dict, output_dir: Path):
                         all_model_names.append(mname)
                     break
 
-        if not all_model_names:
-            ax.set_title(f"{title}\n(no data)")
-            continue
+        if all_model_names:
+            n_models = len(all_model_names)
+            n_datasets = len(dataset_list)
+            bar_width = 0.8 / n_datasets
+            x = np.arange(n_models)
 
-        n_models = len(all_model_names)
-        n_datasets = len(dataset_list)
-        bar_width = 0.8 / n_datasets
-        x = np.arange(n_models)
+            for ds_idx, (ds_name, color, label) in enumerate(dataset_list):
+                run_key = f"{ds_name}_thermompnn_{target}"
+                run = results.get("runs", {}).get(run_key, {})
+                models = run.get("multi_ddg", {}).get("models", {})
 
-        for ds_idx, (ds_name, color, label) in enumerate(dataset_list):
+                r2_vals = []
+                r2_stds = []
+                for mname in all_model_names:
+                    m = models.get(mname, {})
+                    r2_vals.append(m.get("cv_r2_mean", 0) or 0)
+                    r2_stds.append(m.get("cv_r2_std", 0) or 0)
+
+                offset = (ds_idx - (n_datasets - 1) / 2) * bar_width
+                ax_r2.bar(x + offset, r2_vals, bar_width, yerr=r2_stds,
+                          color=color, alpha=0.8, capsize=2, label=label)
+
+            display_names = [model_display[m] for m in all_model_names]
+            ax_r2.set_xticks(x)
+            ax_r2.set_xticklabels(display_names, rotation=45, ha="right")
+
+        ax_r2.set_ylabel("CV $R^2$")
+        ax_r2.set_title(f"{title}: model comparison", fontweight="bold")
+        ax_r2.legend(frameon=False)
+
+        # ---- Right: 24-feature Ridge coefficients with error bars ----
+        ax_coef = axes[row_idx, 1]
+        n_series = len(dataset_list)
+        width = 0.8 / n_series
+        x_coef = np.arange(len(ALL_FEATURES))
+
+        for series_idx, (ds_name, color, label) in enumerate(dataset_list):
             run_key = f"{ds_name}_thermompnn_{target}"
             run = results.get("runs", {}).get(run_key, {})
             models = run.get("multi_ddg", {}).get("models", {})
+            ridge = models.get(COEF_MODEL, {})
+            coefs = ridge.get("feature_coefs_mean")
+            if not coefs:
+                continue
 
-            r2_vals = []
-            r2_stds = []
-            for mname in all_model_names:
-                m = models.get(mname, {})
-                r2_vals.append(m.get("cv_r2_mean", 0) or 0)
-                r2_stds.append(m.get("cv_r2_std", 0) or 0)
+            feat_names = ridge.get("feature_names", [])
+            coef_dict = dict(zip(feat_names, coefs))
+            vals = [coef_dict.get(f, 0) for f in ALL_FEATURES]
 
-            offset = (ds_idx - (n_datasets - 1) / 2) * bar_width
-            ax.bar(x + offset, r2_vals, bar_width, yerr=r2_stds,
-                   color=color, alpha=0.8, capsize=2, label=label)
+            # Error bars from std across CV folds
+            coefs_std = ridge.get("feature_coefs_std")
+            if coefs_std:
+                std_dict = dict(zip(feat_names, coefs_std))
+                errs = [std_dict.get(f, 0) for f in ALL_FEATURES]
+            else:
+                errs = None
 
-        display_names = [model_display[m] for m in all_model_names]
-        ax.set_xticks(x)
-        ax.set_xticklabels(display_names, rotation=45, ha="right")
-        ax.set_ylabel("CV $R^2$")
-        ax.set_title(title, fontweight="bold")
+            offset = (series_idx - (n_series - 1) / 2) * width
+            ax_coef.bar(x_coef + offset, vals, width, yerr=errs,
+                        color=color, alpha=0.8, capsize=1, label=label)
 
-        ax.legend(frameon=False)
+        ax_coef.set_xticks(x_coef)
+        ax_coef.set_xticklabels(ALL_LABELS, rotation=45, ha="right")
+        ax_coef.set_ylabel("Ridge coefficient")
+        ax_coef.set_title(f"{title}: Ridge coefficients (20 AA + 4 NL)",
+                          fontweight="bold")
+        ax_coef.axhline(0, color="gray", linewidth=0.5)
+        ax_coef.axvline(len(AA_ORDER) - 0.5, color="gray", linewidth=0.8,
+                        linestyle="--", alpha=0.6)
+        # Legend only on first row to avoid clutter
+        if row_idx == 0:
+            ax_coef.legend(frameon=False, loc="best")
 
     plt.tight_layout()
     for ext in ["pdf", "png"]:
@@ -395,84 +454,9 @@ def generate_fig3(results: dict, output_dir: Path):
     print("  Generated fig3_model_comparison")
 
 
-# ============================================================================
-# FIGURE 4: DDG coefficients (combined panels)
-# ============================================================================
-
 def generate_fig4(results: dict, output_dir: Path):
-    """Ridge regression coefficients for 20 AA + 4 nonlinear features.
-
-    3 panels: RMSF, B-factor, NMR (1-S²_RCI).
-    Uses ridge_20ddg_nonlinear model (24 features) so that per-AA and
-    summary-statistic coefficients are on the same scale.
-    """
-    AA_ORDER = list("ACDEFGHIKLMNPQRSTVWY")
-    NONLINEAR_NAMES = ["std_ddg", "mean|DDG|", "max|DDG|", "min_ddg"]
-    NONLINEAR_LABELS = [
-        r"std($\Delta\Delta G$)",
-        r"mean|$\Delta\Delta G$|",
-        r"max|$\Delta\Delta G$|",
-        r"min($\Delta\Delta G$)",
-    ]
-    ALL_FEATURES = AA_ORDER + NONLINEAR_NAMES
-    ALL_LABELS = AA_ORDER + NONLINEAR_LABELS
-
-    MODEL_KEY = "ridge_20ddg_nonlinear"
-
-    # 3 panels: RMSF, B-factor, NMR
-    panels = [
-        ("RMSF", [
-            ("atlas_thermompnn_rmsf", "tab:blue", "ATLAS"),
-            ("bbflow_thermompnn_rmsf", "tab:orange", "BBFlow"),
-        ]),
-        ("B-factor", [
-            ("atlas_thermompnn_bfactor", "tab:blue", "ATLAS"),
-            ("pdb_designs_thermompnn_bfactor", "tab:green", "PDB designs"),
-        ]),
-        (r"NMR ($1 - S^2_\mathrm{RCI}$)", [
-            ("rci_s2_thermompnn_bfactor", "tab:purple", r"$S^2_\mathrm{RCI}$"),
-        ]),
-    ]
-
-    fig, axes = plt.subplots(1, 3, figsize=(24, 6))
-
-    for panel_idx, (title, series_list) in enumerate(panels):
-        ax = axes[panel_idx]
-        n_series = len(series_list)
-        width = 0.8 / n_series
-        x = np.arange(len(ALL_FEATURES))
-
-        for series_idx, (key, color, label) in enumerate(series_list):
-            run = results.get("runs", {}).get(key, {})
-            models = run.get("multi_ddg", {}).get("models", {})
-            ridge = models.get(MODEL_KEY, {})
-            coefs = ridge.get("feature_coefs_mean")
-            if not coefs:
-                continue
-
-            feat_names = ridge.get("feature_names", [])
-            coef_dict = dict(zip(feat_names, coefs))
-            vals = [coef_dict.get(f, 0) for f in ALL_FEATURES]
-
-            offset = (series_idx - (n_series - 1) / 2) * width
-            ax.bar(x + offset, vals, width, color=color, alpha=0.8, label=label)
-
-        ax.set_xticks(x)
-        ax.set_xticklabels(ALL_LABELS, rotation=45, ha="right")
-        ax.set_ylabel("Ridge coefficient")
-        ax.set_title(title, fontweight="bold")
-        ax.axhline(0, color="gray", linewidth=0.5)
-        # Vertical separator between 20 AA and 4 nonlinear features
-        ax.axvline(len(AA_ORDER) - 0.5, color="gray", linewidth=0.8,
-                   linestyle="--", alpha=0.6)
-        ax.legend(frameon=False, loc="best")
-
-    plt.tight_layout()
-    for ext in ["pdf", "png"]:
-        fig.savefig(output_dir / f"fig4_ddg_coefficients.{ext}",
-                    dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    print("  Generated fig4_ddg_coefficients")
+    """Kept as no-op; merged into fig3."""
+    print("  (fig4 merged into fig3, skipping)")
 
 
 # ============================================================================
