@@ -238,14 +238,17 @@ def build_dataset(
         if sasa is not None and len(sasa) != L:
             sasa = None
 
-        # mean_abs_ddg and std_ddg from robustness TSV
+        # mean_abs_ddg, mean_ddg, and std_ddg from robustness TSV
         rob_tsv = Path(robustness_dir) / scorer / f"{pid}_robustness.tsv"
         mean_abs_ddg = None
+        mean_ddg = None
         std_ddg = None
         if rob_tsv.exists():
             rob_df = pd.read_csv(rob_tsv, sep="\t")
             if "mean_abs_ddg" in rob_df.columns and len(rob_df) == L:
                 mean_abs_ddg = rob_df["mean_abs_ddg"].values
+            if "mean_ddg" in rob_df.columns and len(rob_df) == L:
+                mean_ddg = rob_df["mean_ddg"].values
             if "std_ddg" in rob_df.columns and len(rob_df) == L:
                 std_ddg = rob_df["std_ddg"].values
 
@@ -264,6 +267,7 @@ def build_dataset(
             "plddt": plddt[valid] if plddt is not None else None,
             "sasa": sasa[valid] if sasa is not None else None,
             "mean_abs_ddg": mean_abs_ddg[valid] if mean_abs_ddg is not None else None,
+            "mean_ddg": mean_ddg[valid] if mean_ddg is not None else None,
             "std_ddg": std_ddg[valid] if std_ddg is not None else None,
             "n_residues": int(n_valid),
         }
@@ -359,6 +363,11 @@ def run_cv_regression(
             return None
         return entry["mean_abs_ddg"].reshape(-1, 1)
 
+    def extract_mean_ddg(entry):
+        if entry["mean_ddg"] is None:
+            return None
+        return entry["mean_ddg"].reshape(-1, 1)
+
     def extract_plddt(entry):
         if entry["plddt"] is None:
             return None
@@ -420,6 +429,12 @@ def run_cv_regression(
             "extractor": extract_mean_abs_ddg,
             "use_ridge": False,
             "feature_names": ["mean|DDG|"],
+            "n_features": 1,
+        },
+        "ols_mean_ddg": {
+            "extractor": extract_mean_ddg,
+            "use_ridge": False,
+            "feature_names": ["mean_DDG"],
             "n_features": 1,
         },
         "ols_plddt": {
@@ -644,7 +659,7 @@ def main():
     print(f"{'Model':<25s} {'n_feat':>6s} {'CV R²':>12s} "
           f"{'CV rho':>12s} {'PP med rho':>10s}")
     print("-" * 70)
-    for name in ["ols_plddt", "ols_mean_abs_ddg", "ols_sasa",
+    for name in ["ols_plddt", "ols_mean_ddg", "ols_mean_abs_ddg", "ols_sasa",
                   "ols_mean_plddt", "ridge_nonlinear_only",
                   "ridge_20ddg", "ridge_20ddg_plddt",
                   "ridge_20ddg_nonlinear", "ridge_20ddg_nonlinear_plddt"]:

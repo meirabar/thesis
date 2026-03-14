@@ -205,6 +205,7 @@ def collect_correlation_run(run) -> dict:
                 ("rho_std_ddg", "std_ddg"),
                 ("rho_max_ddg", "max_ddg"),
                 ("rho_mean_abs_ddg", "mean_abs_ddg"),
+                ("rho_mean_ddg", "mean_ddg"),
             ]:
                 # Try target-specific column first, then fallback
                 col = f"{col_prefix}_{target_suffix}"

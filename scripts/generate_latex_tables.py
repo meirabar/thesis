@@ -491,6 +491,7 @@ def generate_table3(results: dict) -> str:
     # Model display names and feature counts
     model_info = {
         "ols_std_ddg": (r"OLS $\operatorname{std}(\Delta\Delta G)$", 1),
+        "ols_mean_ddg": (r"OLS mean $\Delta\Delta G$", 1),
         "ols_mean_abs_ddg": (r"OLS mean$|\Delta\Delta G|$", 1),
         "ols_sasa": ("OLS SASA", 1),
         "ols_plddt": ("OLS pLDDT", 1),

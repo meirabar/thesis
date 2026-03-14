@@ -402,6 +402,7 @@ class PerProteinResult:
     rho_std_ddg_rmsf: float = np.nan         # std of ddG (landscape ruggedness)
     rho_max_ddg_rmsf: float = np.nan         # worst-case mutation effect
     rho_mean_abs_ddg_rmsf: float = np.nan    # mean |DDG| per residue
+    rho_mean_ddg_rmsf: float = np.nan        # mean DDG (signed) per residue
 
     # pLDDT vs RMSF (baseline)
     rho_plddt_rmsf: float = np.nan
@@ -453,6 +454,7 @@ class PerProteinResult:
     rho_std_ddg_bfactor: float = np.nan
     rho_max_ddg_bfactor: float = np.nan
     rho_mean_abs_ddg_bfactor: float = np.nan
+    rho_mean_ddg_bfactor: float = np.nan
 
     # === B-factor as TARGET (predicting experimental dynamics) ===
     # Robustness vs B-factor (primary)
@@ -580,7 +582,8 @@ def correlate_single_protein(
                        ("frac_neutral", "rho_frac_neutral_rmsf"),
                        ("std_ddg", "rho_std_ddg_rmsf"),
                        ("max_ddg", "rho_max_ddg_rmsf"),
-                       ("mean_abs_ddg", "rho_mean_abs_ddg_rmsf")]:
+                       ("mean_abs_ddg", "rho_mean_abs_ddg_rmsf"),
+                       ("mean_ddg", "rho_mean_ddg_rmsf")]:
         if col in core.columns:
             valid_alt = core.dropna(subset=[col])
             if len(valid_alt) >= 10:
@@ -743,7 +746,8 @@ def correlate_single_protein(
                            ("frac_neutral", "rho_frac_neutral_bfactor"),
                            ("std_ddg", "rho_std_ddg_bfactor"),
                            ("max_ddg", "rho_max_ddg_bfactor"),
-                           ("mean_abs_ddg", "rho_mean_abs_ddg_bfactor")]:
+                           ("mean_abs_ddg", "rho_mean_abs_ddg_bfactor"),
+                           ("mean_ddg", "rho_mean_ddg_bfactor")]:
             if col in bfac_target.columns:
                 valid_alt = bfac_target.dropna(subset=[col])
                 if len(valid_alt) >= 10:
@@ -1861,6 +1865,7 @@ def run_analysis_for_scorer(
         "frac_neutral": "rho_frac_neutral_rmsf",
         "std_ddg": "rho_std_ddg_rmsf",
         "max_ddg": "rho_max_ddg_rmsf",
+        "mean_ddg": "rho_mean_ddg_rmsf",
     }
     alt_medians = {}
     for label, attr in alt_measures.items():

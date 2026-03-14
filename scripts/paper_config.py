@@ -90,6 +90,19 @@ DATASETS = {
         bfactor_only=True,
         has_plddt=True,  # pLDDT from ESMFold predictions
     ),
+    "rci_s2": Dataset(
+        name="rci_s2",
+        display_name="NMR (RCI-S$^2$)",
+        data_dir=f"{CLUSTER.project_dir}/data/rci_s2_processed",
+        robustness_dir=f"{CLUSTER.project_dir}/data/rci_s2_robustness",
+        analysis_dir=f"{CLUSTER.project_dir}/data/rci_s2_analysis",
+        dataset_type="natural",
+        available_targets=["bfactor"],  # stores 1 - rciS2 as "bfactor"
+        available_scorers=["thermompnn"],  # ESM-1v not needed
+        n_proteins_approx=762,
+        bfactor_only=True,
+        has_plddt=True,  # AF2 pLDDT from Gavalda-Garcia dataset
+    ),
 }
 
 
@@ -184,6 +197,7 @@ TABLE3_MODEL_ORDER = [
 # Alternative robustness scalar measures (for Table 3 top half)
 ALT_ROBUSTNESS_MEASURES = [
     ("std_ddg", r"$\operatorname{std}(\Delta\Delta G)$"),
+    ("mean_ddg", r"mean $\Delta\Delta G$"),
     ("max_ddg", r"$\max|\Delta\Delta G|$"),
     ("frac_destab", r"frac.\ destabilizing"),
     ("mean_abs_ddg", r"mean $|\Delta\Delta G|$"),
