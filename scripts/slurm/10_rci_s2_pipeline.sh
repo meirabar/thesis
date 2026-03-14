@@ -97,7 +97,7 @@ START=\$(( SLURM_ARRAY_TASK_ID * BATCH_SIZE + 1 ))
 END=\$(( START + BATCH_SIZE - 1 ))
 
 # Extract batch of PDB paths
-BATCH_FILE=\${SLURM_TMPDIR}/batch_pdbs.txt
+BATCH_FILE=/tmp/rci_batch_\${SLURM_JOB_ID}_\${SLURM_ARRAY_TASK_ID}.txt
 sed -n "\${START},\${END}p" $PDB_LIST > \$BATCH_FILE
 
 N=\$(wc -l < \$BATCH_FILE)
