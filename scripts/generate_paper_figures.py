@@ -400,24 +400,26 @@ def generate_fig3(results: dict, output_dir: Path):
 # ============================================================================
 
 def generate_fig4(results: dict, output_dir: Path):
-    """Per-amino-acid coefficient bar chart + scalar model R^2 comparison.
+    """Ridge regression coefficients for 20 AA + 4 nonlinear features.
 
-    Top row: 20 AA Ridge coefficients (from ridge_20ddg model).
-    Bottom row: CV R^2 for scalar summary models (std_ddg, mean_ddg,
-      mean_abs_ddg, pLDDT, SASA) as grouped bars.
+    3 panels: RMSF, B-factor, NMR (1-S²_RCI).
+    Uses ridge_20ddg_nonlinear model (24 features) so that per-AA and
+    summary-statistic coefficients are on the same scale.
     """
     AA_ORDER = list("ACDEFGHIKLMNPQRSTVWY")
-
-    # Scalar models to show in bottom panels (name in JSON, display label)
-    SCALAR_MODELS = [
-        ("ols_std_ddg", r"std($\Delta\Delta G$)"),
-        ("ols_mean_ddg", r"mean($\Delta\Delta G$)"),
-        ("ols_mean_abs_ddg", r"mean|$\Delta\Delta G$|"),
-        ("ols_plddt", "pLDDT"),
-        ("ols_sasa", "SASA"),
+    NONLINEAR_NAMES = ["std_ddg", "mean|DDG|", "max|DDG|", "min_ddg"]
+    NONLINEAR_LABELS = [
+        r"std($\Delta\Delta G$)",
+        r"mean|$\Delta\Delta G$|",
+        r"max|$\Delta\Delta G$|",
+        r"min($\Delta\Delta G$)",
     ]
+    ALL_FEATURES = AA_ORDER + NONLINEAR_NAMES
+    ALL_LABELS = AA_ORDER + NONLINEAR_LABELS
 
-    # Panel columns: RMSF and B-factor
+    MODEL_KEY = "ridge_20ddg_nonlinear"
+
+    # 3 panels: RMSF, B-factor, NMR
     panels = [
         ("RMSF", [
             ("atlas_thermompnn_rmsf", "tab:blue", "ATLAS"),
@@ -427,68 +429,43 @@ def generate_fig4(results: dict, output_dir: Path):
             ("atlas_thermompnn_bfactor", "tab:blue", "ATLAS"),
             ("pdb_designs_thermompnn_bfactor", "tab:green", "PDB designs"),
         ]),
+        (r"NMR ($1 - S^2_\mathrm{RCI}$)", [
+            ("rci_s2_thermompnn_bfactor", "tab:purple", r"$S^2_\mathrm{RCI}$"),
+        ]),
     ]
 
-    fig, axes = plt.subplots(2, 2, figsize=(16, 10),
-                             gridspec_kw={"height_ratios": [2, 1]})
+    fig, axes = plt.subplots(1, 3, figsize=(24, 6))
 
     for panel_idx, (title, series_list) in enumerate(panels):
-        # --- Top: 20 AA Ridge coefficients ---
-        ax_top = axes[0, panel_idx]
+        ax = axes[panel_idx]
+        n_series = len(series_list)
+        width = 0.8 / n_series
+        x = np.arange(len(ALL_FEATURES))
+
         for series_idx, (key, color, label) in enumerate(series_list):
             run = results.get("runs", {}).get(key, {})
-            multi = run.get("multi_ddg", {})
-            models = multi.get("models", {})
-            ridge = models.get("ridge_20ddg", {})
+            models = run.get("multi_ddg", {}).get("models", {})
+            ridge = models.get(MODEL_KEY, {})
             coefs = ridge.get("feature_coefs_mean")
             if not coefs:
                 continue
 
-            feat_names = ridge.get("feature_names")
-            if isinstance(coefs, list) and feat_names:
-                coef_dict = dict(zip(feat_names, coefs))
-            elif isinstance(coefs, dict):
-                coef_dict = coefs
-            else:
-                coef_dict = dict(zip(AA_ORDER, coefs)) if len(coefs) == 20 else {}
-            vals = [coef_dict.get(aa, 0) for aa in AA_ORDER]
-            x = np.arange(len(AA_ORDER))
-            width = 0.35
-            offset = -width/2 if series_idx == 0 else width/2
-            ax_top.bar(x + offset, vals, width, color=color, alpha=0.8, label=label)
+            feat_names = ridge.get("feature_names", [])
+            coef_dict = dict(zip(feat_names, coefs))
+            vals = [coef_dict.get(f, 0) for f in ALL_FEATURES]
 
-        ax_top.set_xticks(np.arange(len(AA_ORDER)))
-        ax_top.set_xticklabels(AA_ORDER)
-        ax_top.set_ylabel("Ridge coefficient")
-        ax_top.set_title(title, fontweight="bold")
-        ax_top.axhline(0, color="gray", linewidth=0.5)
-        ax_top.legend(frameon=False, loc="upper left")
+            offset = (series_idx - (n_series - 1) / 2) * width
+            ax.bar(x + offset, vals, width, color=color, alpha=0.8, label=label)
 
-        # --- Bottom: scalar model CV R^2 ---
-        ax_bot = axes[1, panel_idx]
-        scalar_labels = [lbl for _, lbl in SCALAR_MODELS]
-        x_sc = np.arange(len(SCALAR_MODELS))
-        width_sc = 0.35
-
-        for series_idx, (key, color, label) in enumerate(series_list):
-            run = results.get("runs", {}).get(key, {})
-            multi = run.get("multi_ddg", {})
-            models = multi.get("models", {})
-            r2_vals = []
-            for model_name, _ in SCALAR_MODELS:
-                m = models.get(model_name, {})
-                r2 = m.get("cv_r2_mean")
-                r2_vals.append(r2 if r2 is not None else 0)
-
-            offset = -width_sc/2 if series_idx == 0 else width_sc/2
-            ax_bot.bar(x_sc + offset, r2_vals, width_sc, color=color,
-                       alpha=0.8, label=label)
-
-        ax_bot.set_xticks(x_sc)
-        ax_bot.set_xticklabels(scalar_labels, rotation=30, ha="right")
-        ax_bot.set_ylabel("CV $R^2$")
-        ax_bot.set_ylim(bottom=0)
-        ax_bot.legend(frameon=False, loc="upper right")
+        ax.set_xticks(x)
+        ax.set_xticklabels(ALL_LABELS, rotation=45, ha="right")
+        ax.set_ylabel("Ridge coefficient")
+        ax.set_title(title, fontweight="bold")
+        ax.axhline(0, color="gray", linewidth=0.5)
+        # Vertical separator between 20 AA and 4 nonlinear features
+        ax.axvline(len(AA_ORDER) - 0.5, color="gray", linewidth=0.8,
+                   linestyle="--", alpha=0.6)
+        ax.legend(frameon=False, loc="best")
 
     plt.tight_layout()
     for ext in ["pdf", "png"]:
