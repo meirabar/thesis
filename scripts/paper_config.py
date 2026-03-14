@@ -169,6 +169,7 @@ TABLE1_COLUMNS = [
     ("bbflow", "rmsf"),
     ("atlas", "bfactor"),
     ("pdb_designs", "bfactor"),
+    ("rci_s2", "bfactor"),
 ]
 
 # Table 1 predictor rows

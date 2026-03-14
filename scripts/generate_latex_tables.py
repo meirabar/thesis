@@ -133,7 +133,7 @@ def generate_table1(results: dict) -> str:
     lines.append(r"\centering")
     lines.append(r"\caption{Bivariate correlations, incremental variance explained,")
     lines.append(r"and partial correlations between per-residue predictors and dynamics")
-    lines.append(r"targets across four dataset--target combinations.")
+    lines.append(r"targets across all dataset--target combinations.")
     lines.append(r"\emph{Median per-protein $\rho$}: median across proteins of the")
     lines.append(r"within-protein Spearman rank correlation.")
     lines.append(r"\emph{Pooled $\rho$}: Spearman correlation on all residues after")
@@ -147,7 +147,9 @@ def generate_table1(results: dict) -> str:
     lines.append(r"All pooled correlations significant at $p < 10^{-10}$.}")
     lines.append(r"\label{tab:pooled}")
     lines.append(r"\small")
-    lines.append(r"\begin{tabular}{@{}l cccc@{}}")
+    n_cols = len(TABLE1_COLUMNS)
+    col_spec = "c" * n_cols
+    lines.append(r"\begin{tabular}{@{}l " + col_spec + r"@{}}")
     lines.append(r"\toprule")
 
     # Column headers
@@ -156,7 +158,10 @@ def generate_table1(results: dict) -> str:
     for ds_name, target in TABLE1_COLUMNS:
         ds = DATASETS[ds_name]
         headers1.append(r"\textbf{" + ds.display_name + "}")
-        headers2.append(r"\textbf{" + ("RMSF" if target == "rmsf" else "B-factor") + "}")
+        tgt_label = "RMSF" if target == "rmsf" else "B-factor"
+        if ds_name == "rci_s2":
+            tgt_label = r"$1{-}S^2_\mathrm{RCI}$"
+        headers2.append(r"\textbf{" + tgt_label + "}")
     lines.append(" & ".join(headers1) + r" \\")
     lines.append(" & ".join(headers2) + r" \\")
     lines.append(r"\midrule")
@@ -175,7 +180,7 @@ def generate_table1(results: dict) -> str:
     lines.append(r"\midrule")
 
     # --- Median per-protein rho (highlight best |rho| per column) ---
-    lines.append(r"\multicolumn{5}{l}{\textit{Median per-protein Spearman $\rho$ (predictor, target)}} \\")
+    lines.append(r"\multicolumn{" + str(n_cols + 1) + r"}{l}{\textit{Median per-protein Spearman $\rho$ (predictor, target)}} \\")
 
     # Collect all values first for per-column highlighting
     pred_list = ["esm1v", "thermompnn", "plddt", "sasa"]
@@ -213,7 +218,7 @@ def generate_table1(results: dict) -> str:
     lines.append(r"\midrule")
 
     # --- Pooled rho (highlight best |rho| per column) ---
-    lines.append(r"\multicolumn{5}{l}{\textit{Pooled Spearman $\rho$ (z-scored residues)}} \\")
+    lines.append(r"\multicolumn{" + str(n_cols + 1) + r"}{l}{\textit{Pooled Spearman $\rho$ (z-scored residues)}} \\")
     pooled_rho_grid = []
     for pred in pred_list:
         row_cells = []
@@ -243,7 +248,7 @@ def generate_table1(results: dict) -> str:
     lines.append(r"\midrule")
 
     # --- Pooled R² (highlight best per column) ---
-    lines.append(r"\multicolumn{5}{l}{\textit{Pooled $R^2$ (OLS on z-scored residues)}} \\")
+    lines.append(r"\multicolumn{" + str(n_cols + 1) + r"}{l}{\textit{Pooled $R^2$ (OLS on z-scored residues)}} \\")
     r2_preds = ["esm1v", "thermompnn", "plddt"]
     r2_grid = []
     for pred in r2_preds:
@@ -274,7 +279,7 @@ def generate_table1(results: dict) -> str:
     lines.append(r"\midrule")
 
     # --- Delta R² (ThermoMPNN over baselines) ---
-    lines.append(r"\multicolumn{5}{l}{\textit{$\Delta R^2$ (adding ThermoMPNN to baseline)}} \\")
+    lines.append(r"\multicolumn{" + str(n_cols + 1) + r"}{l}{\textit{$\Delta R^2$ (adding ThermoMPNN to baseline)}} \\")
     for baseline, label in [("plddt", r"$+$ pLDDT"), ("sasa", r"$+$ SASA")]:
         row = [r"\quad " + label]
         for ds_name, target in TABLE1_COLUMNS:
@@ -286,7 +291,7 @@ def generate_table1(results: dict) -> str:
     lines.append(r"\midrule")
 
     # --- Partial rho ---
-    lines.append(r"\multicolumn{5}{l}{\textit{Partial $\rho$ (ThermoMPNN $|$ confounder)}} \\")
+    lines.append(r"\multicolumn{" + str(n_cols + 1) + r"}{l}{\textit{Partial $\rho$ (ThermoMPNN $|$ confounder)}} \\")
     for conf, label in [("plddt", r"$|$\,pLDDT"), ("sasa", r"$|$\,SASA")]:
         row = [r"\quad " + label]
         for ds_name, target in TABLE1_COLUMNS:
@@ -332,7 +337,9 @@ def generate_table2(results: dict) -> str:
     lines.append(r"Best $|\rho|$ within each column (across structural classes) is shown in \textbf{bold}.}")
     lines.append(r"\label{tab:stratified}")
     lines.append(r"\small")
-    lines.append(r"\begin{tabular}{@{}l cccc@{}}")
+    n_cols = len(TABLE1_COLUMNS)
+    col_spec = "c" * n_cols
+    lines.append(r"\begin{tabular}{@{}l " + col_spec + r"@{}}")
     lines.append(r"\toprule")
 
     # Headers (same as Table 1)
@@ -341,7 +348,10 @@ def generate_table2(results: dict) -> str:
     for ds_name, target in TABLE1_COLUMNS:
         ds = DATASETS[ds_name]
         headers1.append(r"\textbf{" + ds.display_name + "}")
-        headers2.append(r"\textbf{" + ("RMSF" if target == "rmsf" else "B-factor") + "}")
+        tgt_label = "RMSF" if target == "rmsf" else "B-factor"
+        if ds_name == "rci_s2":
+            tgt_label = r"$1{-}S^2_\mathrm{RCI}$"
+        headers2.append(r"\textbf{" + tgt_label + "}")
     lines.append(" & ".join(headers1) + r" \\")
     lines.append(" & ".join(headers2) + r" \\")
     lines.append(r"\midrule")
@@ -349,7 +359,7 @@ def generate_table2(results: dict) -> str:
     n_cols = len(TABLE1_COLUMNS)
 
     # Secondary structure
-    lines.append(r"\multicolumn{5}{l}{\textit{Secondary structure}} \\")
+    lines.append(r"\multicolumn{" + str(n_cols + 1) + r"}{l}{\textit{Secondary structure}} \\")
     ss_labels = {"H": r"$\alpha$-helix", "E": r"$\beta$-sheet", "C": "Coil"}
     # Collect all rows first, then bold best |rho| within each column
     ss_grid = []  # list of (label, [(cell_str, rho_rob), ...])
@@ -373,7 +383,7 @@ def generate_table2(results: dict) -> str:
     lines.append(r"\midrule")
 
     # Burial
-    lines.append(r"\multicolumn{5}{l}{\textit{Burial (RSA cutoffs)}} \\")
+    lines.append(r"\multicolumn{" + str(n_cols + 1) + r"}{l}{\textit{Burial (RSA cutoffs)}} \\")
     burial_labels = {"core": "Core", "boundary": "Boundary", "surface": "Surface"}
     burial_grid = []
     for burial in TABLE2_BURIAL_STRATA:
@@ -420,18 +430,30 @@ def generate_table3(results: dict) -> str:
     lines.append(r"Best value in each column section is shown in \textbf{bold}.}")
     lines.append(r"\label{tab:alt_and_multi}")
     lines.append(r"\small")
-    lines.append(r"\begin{tabular}{@{}l r cccc@{}}")
+    n_cols = len(TABLE1_COLUMNS)
+    col_spec = "c" * n_cols
+    lines.append(r"\begin{tabular}{@{}l r " + col_spec + r"@{}}")
     lines.append(r"\toprule")
 
-    # Headers
-    lines.append(r"& & \textbf{ATLAS} & \textbf{BBFlow} & \textbf{ATLAS} & \textbf{PDB des.} \\")
-    lines.append(r"& Feats & \textbf{RMSF} & \textbf{RMSF} & \textbf{B-fac} & \textbf{B-fac} \\")
+    # Headers - build dynamically from TABLE1_COLUMNS
+    ds_short = {"atlas": "ATLAS", "bbflow": "BBFlow", "pdb_designs": "PDB des.",
+                "rci_s2": "NMR"}
+    tgt_short = {"rmsf": "RMSF", "bfactor": "B-fac"}
+    h1 = ["", ""]
+    h2 = ["", "Feats"]
+    for ds_name, target in TABLE1_COLUMNS:
+        h1.append(r"\textbf{" + ds_short.get(ds_name, ds_name) + "}")
+        tgt_label = tgt_short.get(target, target)
+        if ds_name == "rci_s2":
+            tgt_label = r"$1{-}S^2_\mathrm{RCI}$"
+        h2.append(r"\textbf{" + tgt_label + "}")
+    lines.append(" & ".join(h1) + r" \\")
+    lines.append(" & ".join(h2) + r" \\")
     lines.append(r"\midrule")
 
-    n_cols = len(TABLE1_COLUMNS)
-
     # --- Top half: scalar robustness summaries (median per-protein |rho|) ---
-    lines.append(r"\multicolumn{6}{l}{\textit{Scalar robustness summaries (med.\ per-protein $|\rho|$)}} \\")
+    multicolspan = n_cols + 2
+    lines.append(r"\multicolumn{" + str(multicolspan) + r"}{l}{\textit{Scalar robustness summaries (med.\ per-protein $|\rho|$)}} \\")
 
     # Collect all alt robustness values for per-column highlighting
     alt_grid = []  # [measure_idx][col_idx] = (formatted, raw_val)
@@ -486,7 +508,7 @@ def generate_table3(results: dict) -> str:
     lines.append(r"\midrule")
 
     # --- Bottom half: multi-DDG regression (CV R²) ---
-    lines.append(r"\multicolumn{6}{l}{\textit{Regression models (5-fold protein-level CV $R^2$)}} \\")
+    lines.append(r"\multicolumn{" + str(multicolspan) + r"}{l}{\textit{Regression models (5-fold protein-level CV $R^2$)}} \\")
 
     # Model display names and feature counts
     model_info = {

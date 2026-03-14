@@ -126,17 +126,25 @@ def _load_pooled_data(dataset, scorer) -> pd.DataFrame:
 # ============================================================================
 
 def generate_fig1(results: dict, output_dir: Path):
-    """4-panel per-protein rho histograms + scatter plots."""
-    fig, axes = plt.subplots(2, 4, figsize=(20, 10))
+    """Per-protein rho histograms + scatter plots, one row per dataset-target."""
+    n_panels = len(FIG1_PANELS)
+    fig, axes = plt.subplots(n_panels, 2, figsize=(12, 4 * n_panels))
+    if n_panels == 1:
+        axes = axes[np.newaxis, :]
 
-    for col_idx, (ds_name, target) in enumerate(FIG1_PANELS):
+    for row_idx, (ds_name, target) in enumerate(FIG1_PANELS):
         ds = DATASETS[ds_name]
-        target_label = "RMSF" if target == "rmsf" else "B-factor"
+        if target == "rmsf":
+            target_label = "RMSF"
+        elif ds_name == "rci_s2":
+            target_label = r"$1{-}S^2_\mathrm{RCI}$"
+        else:
+            target_label = "B-factor"
         panel_label = f"{ds.display_name} {target_label}"
 
         # Histogram panel
-        ax_hist = axes[0, col_idx]
-        ax_scat = axes[1, col_idx]
+        ax_hist = axes[row_idx, 0]
+        ax_scat = axes[row_idx, 1]
 
         # Load per-protein data for each scorer
         for scorer, color, label in [
@@ -213,7 +221,7 @@ def generate_fig1(results: dict, output_dir: Path):
         ax_hist.set_xlim([-1, 1])
 
         # Legend only on first panel, no frame
-        if col_idx == 0:
+        if row_idx == 0:
             ax_hist.legend(frameon=False)
 
     plt.tight_layout()
@@ -229,12 +237,21 @@ def generate_fig1(results: dict, output_dir: Path):
 # ============================================================================
 
 def generate_fig2(results: dict, output_dir: Path):
-    """4-panel 2D density scatter plots with marginal distributions."""
-    fig = plt.figure(figsize=(20, 18))
+    """2D density scatter plots with marginal distributions, one per dataset-target."""
+    n_panels = len(FIG2_PANELS)
+    n_cols = 2
+    n_rows = (n_panels + n_cols - 1) // n_cols  # ceil division
+
+    fig = plt.figure(figsize=(20, 9 * n_rows))
 
     for panel_idx, (ds_name, target) in enumerate(FIG2_PANELS):
         ds = DATASETS[ds_name]
-        target_label = "RMSF" if target == "rmsf" else "B-factor"
+        if target == "rmsf":
+            target_label = "RMSF"
+        elif ds_name == "rci_s2":
+            target_label = r"$1{-}S^2_\mathrm{RCI}$"
+        else:
+            target_label = "B-factor"
 
         # Load pooled z-scored data
         pooled = _load_pooled_data(ds_name, "thermompnn")
@@ -257,14 +274,15 @@ def generate_fig2(results: dict, output_dir: Path):
         y_clip = np.percentile(y, 99)
         y_floor = np.percentile(y, 1)
 
-        # Remap panel positions for 2x2 layout
-        row = 0 if panel_idx < 2 else 1
-        col = panel_idx % 2
+        # Remap panel positions for n_rows x n_cols layout
+        row = panel_idx // n_cols
+        col = panel_idx % n_cols
 
         gs_inner = GridSpec(
             4, 4, figure=fig,
             left=0.07 + 0.48 * col, right=0.07 + 0.48 * col + 0.40,
-            bottom=0.07 + 0.48 * (1 - row), top=0.07 + 0.48 * (1 - row) + 0.40,
+            bottom=0.07 + (1.0 / n_rows) * (n_rows - 1 - row),
+            top=0.07 + (1.0 / n_rows) * (n_rows - 1 - row) + (0.85 / n_rows),
             hspace=0.05, wspace=0.05,
         )
 
@@ -401,13 +419,17 @@ def generate_fig3(results: dict, output_dir: Path):
 
         ax_r2.set_ylabel("CV $R^2$")
         ax_r2.set_title(f"{title}: model comparison", fontweight="bold")
-        ax_r2.legend(frameon=False)
+        # Legend only on first row left panel
+        if row_idx == 0:
+            ax_r2.legend(frameon=False)
 
         # ---- Right: 24-feature Ridge coefficients with error bars ----
         ax_coef = axes[row_idx, 1]
         n_series = len(dataset_list)
         width = 0.8 / n_series
-        x_coef = np.arange(len(ALL_FEATURES))
+        # Add gap between AA and nonlinear features
+        x_coef = np.arange(len(ALL_FEATURES), dtype=float)
+        x_coef[len(AA_ORDER):] += 1.0  # shift NL features right by 1 unit
 
         for series_idx, (ds_name, color, label) in enumerate(dataset_list):
             run_key = f"{ds_name}_thermompnn_{target}"
@@ -440,11 +462,11 @@ def generate_fig3(results: dict, output_dir: Path):
         ax_coef.set_title(f"{title}: Ridge coefficients (20 AA + 4 NL)",
                           fontweight="bold")
         ax_coef.axhline(0, color="gray", linewidth=0.5)
-        ax_coef.axvline(len(AA_ORDER) - 0.5, color="gray", linewidth=0.8,
-                        linestyle="--", alpha=0.6)
-        # Legend only on first row to avoid clutter
-        if row_idx == 0:
-            ax_coef.legend(frameon=False, loc="best")
+        # Vertical separator: darker line in the gap between AA and NL
+        sep_x = len(AA_ORDER) - 0.5 + 0.5  # midpoint of the gap
+        ax_coef.axvline(sep_x, color="black", linewidth=1.2,
+                        linestyle="-", alpha=0.7)
+        # No legend on right panels (same colors as left)
 
     plt.tight_layout()
     for ext in ["pdf", "png"]:
