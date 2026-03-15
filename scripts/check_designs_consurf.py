@@ -56,6 +56,54 @@ def get_consurf_info(json_path):
         return {"error": str(e)}
 
 
+def get_pdb_title(protein_dir, pdb_id):
+    """Extract TITLE and KEYWDS from PDB file in protein directory."""
+    pdb_code = pdb_id.split("_")[0]
+    candidates = [
+        protein_dir / f"{pdb_id}.pdb",
+        protein_dir / f"{pdb_code}.pdb",
+        protein_dir / f"{pdb_id}.pdb.gz",
+        protein_dir / f"{pdb_code}.pdb.gz",
+        protein_dir / f"{pdb_id.upper()}.pdb",
+        protein_dir / f"{pdb_id.lower()}.pdb",
+    ]
+    # Also try any .pdb or .cif file in the directory
+    for p in protein_dir.glob("*.pdb"):
+        if p not in candidates:
+            candidates.append(p)
+    for p in protein_dir.glob("*.pdb.gz"):
+        if p not in candidates:
+            candidates.append(p)
+    for p in protein_dir.glob("*.cif"):
+        if p not in candidates:
+            candidates.append(p)
+
+    for pdb_path in candidates:
+        if not pdb_path.exists():
+            continue
+        try:
+            opener = gzip.open if str(pdb_path).endswith(".gz") else open
+            title_lines = []
+            keywds_lines = []
+            header = ""
+            with opener(pdb_path, "rt") as f:
+                for line in f:
+                    if line.startswith("TITLE"):
+                        title_lines.append(line[10:].strip())
+                    elif line.startswith("KEYWDS"):
+                        keywds_lines.append(line[10:].strip())
+                    elif line.startswith("HEADER"):
+                        header = line[10:].strip()
+                    elif line.startswith("ATOM"):
+                        break  # stop after header section
+            title = " ".join(title_lines).strip()
+            keywds = " ".join(keywds_lines).strip()
+            return title, keywds, header
+        except Exception:
+            continue
+    return "", "", ""
+
+
 def main():
     mapping = load_mapping()
 
@@ -101,28 +149,61 @@ def main():
             results.append((pid, info))
 
     print(f"Have ConSurf scores: {len(results)} / {len(design_ids)}")
-    print(f"\n{'PDB_ID':12s} {'MSA_seqs':>10s} {'residues':>10s} {'scored':>8s} {'mean_score':>12s}")
-    print("-" * 60)
+
+    # Get PDB titles for flagged proteins
+    print(f"\n{'PDB_ID':12s} {'MSA_seqs':>10s} {'scored':>8s} {'mean_score':>10s}  TITLE")
+    print("=" * 120)
     for pid, info in sorted(results, key=lambda x: -(x[1].get("n_seqs", 0)
                             if isinstance(x[1].get("n_seqs"), (int, float)) else 0)):
         n_seqs = info.get("n_seqs", "?")
-        n_res = info.get("n_residues", "?")
         n_scored = info.get("n_scored", "?")
         mean_s = info.get("mean_score")
         mean_str = f"{mean_s:.3f}" if mean_s is not None else "?"
-        print(f"{pid:12s} {str(n_seqs):>10s} {str(n_res):>10s} {str(n_scored):>8s} {mean_str:>12s}")
+        protein_dir = DESIGNS_DIR / pid
+        title, keywds, header = get_pdb_title(protein_dir, pid)
+        title_short = title[:70] if title else "(no title)"
+        print(f"{pid:12s} {str(n_seqs):>10s} {str(n_scored):>8s} {mean_str:>10s}  {title_short}")
 
-    # Also print the MSA_DATA keys from first file to understand structure
+    # Summary: check for keywords suggesting natural protein
+    print(f"\n\n--- Keyword analysis ---")
+    natural_keywords = ["wild type", "wild-type", "wildtype", "native",
+                        "mutant", "mutation", "variant", "crystal structure of",
+                        "enzyme", "kinase", "protease", "lyase", "synthase",
+                        "transferase", "oxidase", "reductase", "dehydrogenase"]
+    design_keywords = ["de novo", "denovo", "designed", "design", "computational",
+                       "rosetta", "hallucin", "artificial", "synthetic"]
+    flagged_natural = []
+    flagged_design = []
+    for pid, info in results:
+        protein_dir = DESIGNS_DIR / pid
+        title, keywds, header = get_pdb_title(protein_dir, pid)
+        combined = (title + " " + keywds + " " + header).lower()
+        nat_hits = [kw for kw in natural_keywords if kw in combined]
+        des_hits = [kw for kw in design_keywords if kw in combined]
+        if nat_hits and not des_hits:
+            flagged_natural.append((pid, nat_hits, title[:60]))
+        elif des_hits:
+            flagged_design.append((pid, des_hits, title[:60]))
+
+    print(f"\nLikely NATURAL (has natural keywords, no design keywords): {len(flagged_natural)}")
+    for pid, kws, title in flagged_natural:
+        print(f"  {pid:12s}  keywords={kws}  title={title}")
+
+    print(f"\nLikely DESIGNED (has design keywords): {len(flagged_design)}")
+    for pid, kws, title in flagged_design:
+        print(f"  {pid:12s}  keywords={kws}  title={title}")
+
+    print(f"\nAmbiguous (neither clear natural nor design keywords): "
+          f"{len(results) - len(flagged_natural) - len(flagged_design)}")
+
+    # Also print MSA_DATA keys from first file to understand JSON structure
     if results:
-        first_path = None
         pid0 = results[0][0]
         parts = pid0.split("_")
         pdb, chain = parts
         cand = CONSURF_FILES / f"{pdb.upper()}_{chain.upper()}_consurf_info.json"
         if cand.exists():
-            first_path = cand
-        if first_path:
-            with open(first_path) as f:
+            with open(cand) as f:
                 data = json.load(f)
             print(f"\nExample ConSurf JSON keys for {pid0}:")
             print(f"  Top-level: {list(data.keys())}")
