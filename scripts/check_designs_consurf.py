@@ -39,31 +39,37 @@ def get_consurf_info(json_path):
         with open(json_path) as f:
             data = json.load(f)
         scores = data.get("SCORE", [])
-        msa = data.get("MSA_DATA", data.get("MSA DATA", {}))
-        # Try many possible key names for MSA depth
-        n_seqs = "?"
-        for key in ("n_sequences", "num_sequences", "NUMBER_OF_SEQS",
-                     "n_seqs", "number_of_sequences", "NSEQS"):
-            if key in msa:
-                n_seqs = msa[key]
-                break
-        if n_seqs == "?" and msa:
-            # Fallback: try any key with "seq" in name
-            for key, val in msa.items():
-                if "seq" in key.lower() and isinstance(val, (int, float)):
-                    n_seqs = val
-                    break
-        msa_keys = list(msa.keys()) if msa else []
         n_residues = len(scores)
         non_none = [s for s in scores if s is not None]
         n_scored = len(non_none)
         mean_score = sum(non_none) / len(non_none) if non_none else None
+
+        # MSA depth: try msa_ratio (top-level), or dig into MSA DATA
+        n_seqs = "?"
+        msa_ratio = data.get("msa_ratio")
+        if msa_ratio is not None:
+            n_seqs = f"ratio={msa_ratio:.2f}" if isinstance(msa_ratio, float) else str(msa_ratio)
+
+        msa_raw = data.get("MSA_DATA", data.get("MSA DATA"))
+        msa_keys = []
+        if isinstance(msa_raw, dict):
+            msa_keys = list(msa_raw.keys())
+            for key in ("n_sequences", "num_sequences", "NUMBER_OF_SEQS",
+                         "n_seqs", "number_of_sequences", "NSEQS"):
+                if key in msa_raw:
+                    n_seqs = msa_raw[key]
+                    break
+        elif isinstance(msa_raw, list):
+            n_seqs = f"list[{len(msa_raw)}]"
+            msa_keys = [f"list_len={len(msa_raw)}"]
+
         return {
             "n_seqs": n_seqs,
             "n_residues": n_residues,
             "n_scored": n_scored,
             "mean_score": mean_score,
             "msa_keys": msa_keys,
+            "top_keys": list(data.keys()),
         }
     except Exception as e:
         return {"error": str(e)}
@@ -226,23 +232,12 @@ def main():
     print(f"\nAmbiguous (neither clear natural nor design keywords): "
           f"{len(results) - len(flagged_natural) - len(flagged_design)}")
 
-    # Also print MSA_DATA keys from first file to understand JSON structure
+    # Show JSON structure from first file
     if results:
-        pid0 = results[0][0]
-        parts = pid0.split("_")
-        pdb, chain = parts
-        cand = CONSURF_FILES / f"{pdb.upper()}_{chain.upper()}_consurf_info.json"
-        if cand.exists():
-            with open(cand) as f:
-                data = json.load(f)
-            print(f"\nExample ConSurf JSON keys for {pid0}:")
-            print(f"  Top-level: {list(data.keys())}")
-            msa = data.get("MSA_DATA", data.get("MSA DATA", {}))
-            if msa:
-                print(f"  MSA_DATA keys: {list(msa.keys())}")
-                for k, v in msa.items():
-                    if isinstance(v, (int, float, str)):
-                        print(f"    {k}: {v}")
+        info0 = results[0][1]
+        print(f"\nFirst file JSON structure:")
+        print(f"  Top-level keys: {info0.get('top_keys', '?')}")
+        print(f"  MSA DATA type/keys: {info0.get('msa_keys', '?')}")
 
 
 if __name__ == "__main__":
