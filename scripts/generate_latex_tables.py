@@ -126,33 +126,8 @@ def _get_strat(run, strat_type, category, field):
 # TABLE 1: Main bivariate results
 # ============================================================================
 
-def generate_table1(results: dict) -> str:
-    """Generate Table 1: main bivariate, incremental, and partial results."""
-    lines = []
-    lines.append(r"\begin{table}[htbp]")
-    lines.append(r"\centering")
-    lines.append(r"\caption{Bivariate correlations, incremental variance explained,")
-    lines.append(r"partial correlations, and conservation analysis between per-residue predictors and dynamics")
-    lines.append(r"targets across all dataset--target combinations.")
-    lines.append(r"\emph{Median per-protein $\rho$}: median across proteins of the")
-    lines.append(r"within-protein Spearman rank correlation.")
-    lines.append(r"\emph{Pooled $\rho$}: Spearman correlation on all residues after")
-    lines.append(r"within-protein z-scoring.")
-    lines.append(r"\emph{Pooled $R^2$}: OLS on z-scored residues.")
-    lines.append(r"\emph{$\Delta R^2$}: increase in $R^2$ when adding ThermoMPNN")
-    lines.append(r"$\operatorname{std}(\Delta\Delta G)$ to the baseline predictor.")
-    lines.append(r"\emph{Partial $\rho$}: Spearman correlation of robustness vs.")
-    lines.append(r"target after controlling for the indicated confounder.")
-    lines.append(r"Best value in each predictor comparison is shown in \textbf{bold}.")
-    lines.append(r"All pooled correlations significant at $p < 10^{-10}$.}")
-    lines.append(r"\label{tab:pooled}")
-    lines.append(r"\small")
-    n_cols = len(TABLE1_COLUMNS)
-    col_spec = "c" * n_cols
-    lines.append(r"\begin{tabular}{@{}l " + col_spec + r"@{}}")
-    lines.append(r"\toprule")
-
-    # Column headers
+def _table1_header(lines, n_cols):
+    """Shared column headers for Table 1 and Supp Table S1."""
     headers1 = [""]
     headers2 = [""]
     for ds_name, target in TABLE1_COLUMNS:
@@ -165,6 +140,32 @@ def generate_table1(results: dict) -> str:
     lines.append(" & ".join(headers1) + r" \\")
     lines.append(" & ".join(headers2) + r" \\")
     lines.append(r"\midrule")
+
+
+def generate_table1(results: dict) -> str:
+    """Generate Table 1: simple bivariate correlations and R^2."""
+    lines = []
+    lines.append(r"\begin{table}[htbp]")
+    lines.append(r"\centering")
+    lines.append(r"\caption{Bivariate correlations between per-residue predictors and dynamics")
+    lines.append(r"targets across all dataset--target combinations.")
+    lines.append(r"\emph{Median per-protein $\rho$}: median across proteins of the")
+    lines.append(r"within-protein Spearman rank correlation.")
+    lines.append(r"\emph{Pooled $\rho$}: Spearman correlation on all residues after")
+    lines.append(r"within-protein z-scoring.")
+    lines.append(r"\emph{Pooled $R^2$}: OLS on z-scored residues.")
+    lines.append(r"Conservation scores from ConSurf Rate4Site (ATLAS only).")
+    lines.append(r"Best value in each predictor comparison is shown in \textbf{bold}.")
+    lines.append(r"All pooled correlations significant at $p < 10^{-10}$.")
+    lines.append(r"Partial correlations and incremental $R^2$ are in Supplementary Table~\ref{tab:supp_partial}.}")
+    lines.append(r"\label{tab:pooled}")
+    lines.append(r"\small")
+    n_cols = len(TABLE1_COLUMNS)
+    col_spec = "c" * n_cols
+    lines.append(r"\begin{tabular}{@{}l " + col_spec + r"@{}}")
+    lines.append(r"\toprule")
+
+    _table1_header(lines, n_cols)
 
     # n proteins / n residues
     row_np = ["$n$ proteins"]
@@ -182,15 +183,19 @@ def generate_table1(results: dict) -> str:
     # --- Median per-protein rho (highlight best |rho| per column) ---
     lines.append(r"\multicolumn{" + str(n_cols + 1) + r"}{l}{\textit{Median per-protein Spearman $\rho$ (predictor, target)}} \\")
 
-    # Collect all values first for per-column highlighting
-    pred_list = ["esm1v", "thermompnn", "plddt", "sasa"]
+    # Predictors: ESM-1v, ThermoMPNN, pLDDT, SASA, Conservation
+    pred_list = ["esm1v", "thermompnn", "plddt", "sasa", "conservation"]
     pred_labels = {"esm1v": "ESM-1v", "thermompnn": "ThermoMPNN",
-                   "plddt": "pLDDT", "sasa": "SASA"}
-    med_rho_grid = []  # [pred_idx][col_idx] = (formatted, raw_val)
+                   "plddt": "pLDDT", "sasa": "SASA",
+                   "conservation": "Conservation"}
+    med_rho_grid = []
     for pred in pred_list:
         row_cells = []
         for ds_name, target in TABLE1_COLUMNS:
-            if pred in ("plddt", "sasa"):
+            if pred == "conservation":
+                run = _get_run(results, ds_name, "thermompnn", target)
+                val = _get_pp(run, "median_rho_conservation")
+            elif pred in ("plddt", "sasa"):
                 run = _get_run(results, ds_name, "thermompnn", target)
                 val = _get_pp(run, f"median_rho_{pred}")
             else:
@@ -223,7 +228,10 @@ def generate_table1(results: dict) -> str:
     for pred in pred_list:
         row_cells = []
         for ds_name, target in TABLE1_COLUMNS:
-            if pred in ("plddt", "sasa"):
+            if pred == "conservation":
+                run = _get_run(results, ds_name, "thermompnn", target)
+                val = _get_corr(run, "pooled_rho_conservation")
+            elif pred in ("plddt", "sasa"):
                 run = _get_run(results, ds_name, "thermompnn", target)
                 val = _get_corr(run, f"pooled_rho_{pred}")
             else:
@@ -276,56 +284,6 @@ def generate_table1(results: dict) -> str:
         for col_idx in range(n_cols):
             row.append(r2_grid[pred_idx][col_idx][0])
         lines.append(" & ".join(row) + r" \\")
-    lines.append(r"\midrule")
-
-    # --- Delta R² (ThermoMPNN over baselines) ---
-    lines.append(r"\multicolumn{" + str(n_cols + 1) + r"}{l}{\textit{$\Delta R^2$ (adding ThermoMPNN to baseline)}} \\")
-    for baseline, label in [("plddt", r"$+$ pLDDT"), ("sasa", r"$+$ SASA")]:
-        row = [r"\quad " + label]
-        for ds_name, target in TABLE1_COLUMNS:
-            run = _get_run(results, ds_name, "thermompnn", target)
-            field = f"delta_r2_over_{baseline}"
-            val = _get_corr(run, field)
-            row.append(_signed(val) if val is not None else "---")
-        lines.append(" & ".join(row) + r" \\")
-    lines.append(r"\midrule")
-
-    # --- Partial rho ---
-    lines.append(r"\multicolumn{" + str(n_cols + 1) + r"}{l}{\textit{Partial $\rho$ (ThermoMPNN $|$ confounder)}} \\")
-    for conf, label in [("plddt", r"$|$\,pLDDT"), ("sasa", r"$|$\,SASA"),
-                         ("conservation", r"$|$\,Conservation")]:
-        row = [r"\quad " + label]
-        for ds_name, target in TABLE1_COLUMNS:
-            run = _get_run(results, ds_name, "thermompnn", target)
-            field = f"pooled_partial_rho_{conf}"
-            val = _get_corr(run, field)
-            row.append(_signed(val))
-        lines.append(" & ".join(row) + r" \\")
-    lines.append(r"\midrule")
-
-    # --- Conservation baseline correlations ---
-    lines.append(r"\multicolumn{" + str(n_cols + 1) + r"}{l}{\textit{Conservation (ConSurf Rate4Site)}} \\")
-    # Conservation vs dynamics baseline
-    row_cons = [r"\quad $\rho$(conservation, target)"]
-    for ds_name, target in TABLE1_COLUMNS:
-        run = _get_run(results, ds_name, "thermompnn", target)
-        val = _get_corr(run, "pooled_rho_conservation")
-        row_cons.append(_signed(val))
-    lines.append(" & ".join(row_cons) + r" \\")
-    # Robustness vs conservation (collinearity)
-    row_col = [r"\quad $\rho$(robustness, conservation)"]
-    for ds_name, target in TABLE1_COLUMNS:
-        run = _get_run(results, ds_name, "thermompnn", target)
-        val = _get_corr(run, "pooled_rho_robustness_conservation")
-        row_col.append(_signed(val))
-    lines.append(" & ".join(row_col) + r" \\")
-    # Delta R² over conservation
-    row_dr2 = [r"\quad $\Delta R^2$ over conservation"]
-    for ds_name, target in TABLE1_COLUMNS:
-        run = _get_run(results, ds_name, "thermompnn", target)
-        val = _get_corr(run, "pooled_delta_r2_over_conservation")
-        row_dr2.append(_signed(val) if val is not None else "---")
-    lines.append(" & ".join(row_dr2) + r" \\")
     lines.append(r"\midrule")
 
     # --- Frac beats pLDDT ---
@@ -604,11 +562,77 @@ def generate_table3(results: dict) -> str:
 
 
 # ============================================================================
+# SUPP TABLE S1: Partial correlations and incremental R²
+# ============================================================================
+
+def generate_table_s1(results: dict) -> str:
+    """Generate Supp Table S1: partial correlations, Delta R², and conservation collinearity."""
+    lines = []
+    lines.append(r"\begin{table}[htbp]")
+    lines.append(r"\centering")
+    lines.append(r"\caption{Partial correlations and incremental variance explained.")
+    lines.append(r"\emph{$\Delta R^2$}: increase in $R^2$ when adding ThermoMPNN")
+    lines.append(r"$\operatorname{std}(\Delta\Delta G)$ to the baseline predictor.")
+    lines.append(r"\emph{Partial $\rho$}: Spearman correlation of robustness vs.")
+    lines.append(r"target after controlling for the indicated confounder.")
+    lines.append(r"Conservation scores from ConSurf Rate4Site (ATLAS only).")
+    lines.append(r"All partial correlations significant at $p < 10^{-6}$.}")
+    lines.append(r"\label{tab:supp_partial}")
+    lines.append(r"\small")
+    n_cols = len(TABLE1_COLUMNS)
+    col_spec = "c" * n_cols
+    lines.append(r"\begin{tabular}{@{}l " + col_spec + r"@{}}")
+    lines.append(r"\toprule")
+
+    _table1_header(lines, n_cols)
+
+    # --- Delta R² (ThermoMPNN over baselines) ---
+    lines.append(r"\multicolumn{" + str(n_cols + 1) + r"}{l}{\textit{$\Delta R^2$ (adding ThermoMPNN to baseline)}} \\")
+    for baseline, label in [("plddt", r"$+$ pLDDT"), ("sasa", r"$+$ SASA"),
+                             ("conservation", r"$+$ Conservation")]:
+        row = [r"\quad " + label]
+        for ds_name, target in TABLE1_COLUMNS:
+            run = _get_run(results, ds_name, "thermompnn", target)
+            field = f"delta_r2_over_{baseline}"
+            val = _get_corr(run, field)
+            row.append(_signed(val) if val is not None else "---")
+        lines.append(" & ".join(row) + r" \\")
+    lines.append(r"\midrule")
+
+    # --- Partial rho ---
+    lines.append(r"\multicolumn{" + str(n_cols + 1) + r"}{l}{\textit{Partial $\rho$ (ThermoMPNN $|$ confounder)}} \\")
+    for conf, label in [("plddt", r"$|$\,pLDDT"), ("sasa", r"$|$\,SASA"),
+                         ("conservation", r"$|$\,Conservation")]:
+        row = [r"\quad " + label]
+        for ds_name, target in TABLE1_COLUMNS:
+            run = _get_run(results, ds_name, "thermompnn", target)
+            field = f"pooled_partial_rho_{conf}"
+            val = _get_corr(run, field)
+            row.append(_signed(val))
+        lines.append(" & ".join(row) + r" \\")
+    lines.append(r"\midrule")
+
+    # --- Robustness vs conservation (collinearity) ---
+    row_col = [r"$\rho$(robustness, conservation)"]
+    for ds_name, target in TABLE1_COLUMNS:
+        run = _get_run(results, ds_name, "thermompnn", target)
+        val = _get_corr(run, "pooled_rho_robustness_conservation")
+        row_col.append(_signed(val))
+    lines.append(" & ".join(row_col) + r" \\")
+
+    lines.append(r"\bottomrule")
+    lines.append(r"\end{tabular}")
+    lines.append(r"\end{table}")
+    return "\n".join(lines)
+
+
+# ============================================================================
 # MAIN
 # ============================================================================
 
 TABLE_GENERATORS = {
     "table1": ("Table 1 (bivariate results)", generate_table1),
+    "table_s1": ("Supp Table S1 (partial correlations & incremental R^2)", generate_table_s1),
     "table2": ("Table 2 (stratified)", generate_table2),
     "table3": ("Table 3 (alt measures + multi-DDG)", generate_table3),
 }
