@@ -127,8 +127,11 @@ def load_rmsf(protein_dir: str) -> Optional[np.ndarray]:
     return df[rmsf_cols].mean(axis=1).values
 
 
-def compute_sasa(pdb_path: str) -> Optional[np.ndarray]:
-    """Compute per-residue SASA using mdtraj."""
+def compute_sasa(pdb_path: str, chain_id: Optional[str] = None) -> Optional[np.ndarray]:
+    """Compute per-residue SASA using mdtraj.
+
+    If chain_id is given, only return SASA for residues in that chain.
+    """
     try:
         import mdtraj
         traj = mdtraj.load(pdb_path)
@@ -136,9 +139,30 @@ def compute_sasa(pdb_path: str) -> Optional[np.ndarray]:
         sasa_per_residue = np.zeros(traj.topology.n_residues)
         for atom in traj.topology.atoms:
             sasa_per_residue[atom.residue.index] += sasa_per_atom[0, atom.index]
+
+        if chain_id is not None:
+            # Filter to residues in the specified chain
+            chain_residue_indices = [
+                r.index for r in traj.topology.residues
+                if r.chain.index == _get_chain_index(traj.topology, chain_id)
+            ]
+            if chain_residue_indices:
+                return sasa_per_residue[chain_residue_indices]
+            return None
+
         return sasa_per_residue
     except Exception:
         return None
+
+
+def _get_chain_index(topology, chain_id: str) -> int:
+    """Get mdtraj chain index from PDB chain letter."""
+    for chain in topology.chains:
+        # mdtraj stores chain IDs as integers but we can match by index
+        # Chain letters map to indices: A=0, B=1, etc.
+        if chr(ord('A') + chain.index) == chain_id.upper():
+            return chain.index
+    return 0  # fallback to first chain
 
 
 # ======================================================================
@@ -235,7 +259,9 @@ def build_dataset(
             plddt = None
 
         pdb_files = list(Path(protein_dir).glob("*.pdb"))
-        sasa = compute_sasa(str(pdb_files[0])) if pdb_files else None
+        # Extract chain ID from protein ID (e.g., "1NA0_A" -> "A")
+        chain_id = pid.split("_")[1] if "_" in pid else None
+        sasa = compute_sasa(str(pdb_files[0]), chain_id=chain_id) if pdb_files else None
         if sasa is not None and len(sasa) != L:
             sasa = None
 

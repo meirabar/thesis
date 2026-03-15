@@ -256,6 +256,7 @@ def collect_multi_ddg_run(run) -> dict:
             "per_protein_rho_median": _nan_safe(model_data.get("per_protein_rho_median")),
             "feature_names": model_data.get("feature_names"),
             "feature_coefs_mean": model_data.get("feature_coefs_mean"),
+            "feature_coefs_std": model_data.get("feature_coefs_std"),
         }
 
     # Find best model (highest CV R²)
