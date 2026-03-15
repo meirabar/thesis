@@ -8,7 +8,7 @@ files for distribution/scatter figures.
 Usage:
   python generate_paper_figures.py \
       --results unified_results.json \
-      --output-dir figures/
+      --output-dir /sci/labs/orzuk/orzuk/projects/ProteinStability/data/paper_results
   python generate_paper_figures.py --results ... --figure fig1
 """
 
@@ -696,10 +696,12 @@ FIGURE_GENERATORS = {
 
 def main():
     parser = argparse.ArgumentParser(description="Generate paper figures")
-    parser.add_argument("--results", type=str, required=True,
+    default_base = "/sci/labs/orzuk/orzuk/projects/ProteinStability/data/paper_results"
+    parser.add_argument("--results", type=str,
+                        default=f"{default_base}/unified_results.json",
                         help="Path to unified_results.json")
-    parser.add_argument("--output-dir", type=str, default="figures",
-                        help="Output directory for figures")
+    parser.add_argument("--output-dir", type=str, default=default_base,
+                        help="Base output directory (figures go into Figures/ subdirectory)")
     parser.add_argument("--figure", type=str, default=None,
                         help="Generate only this figure (e.g., 'fig1')")
     args = parser.parse_args()
@@ -707,7 +709,7 @@ def main():
     with open(args.results) as f:
         results = json.load(f)
 
-    out_dir = Path(args.output_dir)
+    out_dir = Path(args.output_dir) / "Figures"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     figs_to_gen = FIGURE_GENERATORS

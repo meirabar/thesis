@@ -6,7 +6,7 @@ Reads unified_results.json (produced by collect_results.py) and outputs
 LaTeX table fragments that can be \\input{} into the paper or copy-pasted.
 
 Usage:
-  python generate_latex_tables.py --results unified_results.json --output-dir tables/
+  python generate_latex_tables.py  # uses default paths under data/paper_results/
   python generate_latex_tables.py --results unified_results.json --table table1
 """
 
@@ -590,10 +590,12 @@ TABLE_GENERATORS = {
 
 def main():
     parser = argparse.ArgumentParser(description="Generate LaTeX tables from unified results")
-    parser.add_argument("--results", type=str, required=True,
+    default_base = "/sci/labs/orzuk/orzuk/projects/ProteinStability/data/paper_results"
+    parser.add_argument("--results", type=str,
+                        default=f"{default_base}/unified_results.json",
                         help="Path to unified_results.json")
-    parser.add_argument("--output-dir", type=str, default="tables",
-                        help="Output directory for .tex files")
+    parser.add_argument("--output-dir", type=str, default=default_base,
+                        help="Base output directory (tables go into Tables/ subdirectory)")
     parser.add_argument("--table", type=str, default=None,
                         help="Generate only this table (e.g., 'table1')")
     args = parser.parse_args()
@@ -601,7 +603,7 @@ def main():
     with open(args.results) as f:
         results = json.load(f)
 
-    out_dir = Path(args.output_dir)
+    out_dir = Path(args.output_dir) / "Tables"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     tables_to_gen = TABLE_GENERATORS
