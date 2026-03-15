@@ -39,9 +39,21 @@ def get_consurf_info(json_path):
         with open(json_path) as f:
             data = json.load(f)
         scores = data.get("SCORE", [])
-        msa = data.get("MSA_DATA", {})
-        n_seqs = msa.get("n_sequences", msa.get("num_sequences",
-                  msa.get("NUMBER_OF_SEQS", "?")))
+        msa = data.get("MSA_DATA", data.get("MSA DATA", {}))
+        # Try many possible key names for MSA depth
+        n_seqs = "?"
+        for key in ("n_sequences", "num_sequences", "NUMBER_OF_SEQS",
+                     "n_seqs", "number_of_sequences", "NSEQS"):
+            if key in msa:
+                n_seqs = msa[key]
+                break
+        if n_seqs == "?" and msa:
+            # Fallback: try any key with "seq" in name
+            for key, val in msa.items():
+                if "seq" in key.lower() and isinstance(val, (int, float)):
+                    n_seqs = val
+                    break
+        msa_keys = list(msa.keys()) if msa else []
         n_residues = len(scores)
         non_none = [s for s in scores if s is not None]
         n_scored = len(non_none)
@@ -51,6 +63,7 @@ def get_consurf_info(json_path):
             "n_residues": n_residues,
             "n_scored": n_scored,
             "mean_score": mean_score,
+            "msa_keys": msa_keys,
         }
     except Exception as e:
         return {"error": str(e)}
@@ -164,6 +177,23 @@ def main():
         title_short = title[:70] if title else "(no title)"
         print(f"{pid:12s} {str(n_seqs):>10s} {str(n_scored):>8s} {mean_str:>10s}  {title_short}")
 
+    # If first entry has n_seqs="?", show MSA keys for debugging
+    if results and results[0][1].get("n_seqs") == "?":
+        msa_keys = results[0][1].get("msa_keys", [])
+        print(f"\nWARNING: MSA depth not found. MSA keys in first file: {msa_keys}")
+        # Also dump the full MSA DATA dict for the first file
+        pid0 = results[0][0]
+        pdb0, chain0 = pid0.split("_")
+        cand0 = CONSURF_FILES / f"{pdb0.upper()}_{chain0.upper()}_consurf_info.json"
+        if cand0.exists():
+            with open(cand0) as f:
+                d = json.load(f)
+            msa_data = d.get("MSA_DATA", d.get("MSA DATA", {}))
+            print(f"Full MSA DATA for {pid0}:")
+            for k, v in msa_data.items():
+                vstr = str(v)[:80] if not isinstance(v, (int, float)) else str(v)
+                print(f"  {k}: {vstr}")
+
     # Summary: check for keywords suggesting natural protein
     print(f"\n\n--- Keyword analysis ---")
     natural_keywords = ["wild type", "wild-type", "wildtype", "native",
@@ -207,7 +237,7 @@ def main():
                 data = json.load(f)
             print(f"\nExample ConSurf JSON keys for {pid0}:")
             print(f"  Top-level: {list(data.keys())}")
-            msa = data.get("MSA_DATA", {})
+            msa = data.get("MSA_DATA", data.get("MSA DATA", {}))
             if msa:
                 print(f"  MSA_DATA keys: {list(msa.keys())}")
                 for k, v in msa.items():

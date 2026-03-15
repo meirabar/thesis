@@ -187,6 +187,16 @@ def collect_correlation_run(run) -> dict:
         round(r2_joint_sasa - r2_sasa, 4) if r2_joint_sasa and r2_sasa else None
     )
 
+    # Suppress conservation fields for designed-protein datasets
+    # (ConSurf scores are meaningless for proteins with no evolutionary history)
+    if run.ds.dataset_type == "designed":
+        for key in list(corr.keys()):
+            if "conservation" in key:
+                corr[key] = None
+        for key in list(per_prot.keys()):
+            if "conservation" in key:
+                per_prot[key] = None
+
     result["correlation"] = {
         "pooled": corr,
         "per_protein_summary": per_prot,

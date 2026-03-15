@@ -204,6 +204,7 @@ def build_dataset(
     target: str,
     max_seq_length: int = 0,
     max_proteins: int = 0,
+    exclude_proteins: Optional[set] = None,
 ) -> Tuple[List[dict], List[str]]:
     """Build list of per-protein data dicts for regression.
 
@@ -215,6 +216,13 @@ def build_dataset(
         d.name for d in atlas_proteins_dir.iterdir()
         if d.is_dir() and (d / ".done").exists()
     ])
+
+    if exclude_proteins:
+        n_before = len(protein_ids)
+        protein_ids = [p for p in protein_ids if p not in exclude_proteins]
+        n_excluded = n_before - len(protein_ids)
+        if n_excluded > 0:
+            print(f"Excluded {n_excluded} proteins")
 
     if max_proteins > 0:
         protein_ids = protein_ids[:max_proteins]
@@ -693,11 +701,15 @@ def main():
                         help="Ridge regularization strength")
     parser.add_argument("--max_seq_length", type=int, default=0)
     parser.add_argument("--max_proteins", type=int, default=0)
+    parser.add_argument("--exclude", type=str, nargs="*", default=None,
+                        help="Protein IDs to exclude (e.g. 2GAR_A 3F4M_A)")
     args = parser.parse_args()
 
     print(f"{'='*60}")
     print(f"Multi-DDG Regression: {args.scorer} -> {args.target}")
     print(f"{'='*60}")
+
+    exclude_set = set(args.exclude) if args.exclude else set()
 
     dataset = build_dataset(
         atlas_dir=args.atlas_dir,
@@ -706,6 +718,7 @@ def main():
         target=args.target,
         max_seq_length=args.max_seq_length,
         max_proteins=args.max_proteins,
+        exclude_proteins=exclude_set,
     )
 
     if not dataset:

@@ -1685,7 +1685,11 @@ def main():
     parser.add_argument("--consurf_dir", type=str, default=None,
                         help="Path to ConSurf-DB directory containing JSON files "
                              "and identical_to_unique_dict.txt")
+    parser.add_argument("--exclude", type=str, nargs="*", default=None,
+                        help="Protein IDs to exclude (e.g. 2GAR_A 3F4M_A)")
     args = parser.parse_args()
+
+    exclude_set = set(args.exclude) if args.exclude else set()
 
     for scorer in args.scorer:
         print(f"\n{'='*60}")
@@ -1706,6 +1710,7 @@ def main():
             target=args.target,
             transform=args.transform,
             consurf_dir=args.consurf_dir,
+            exclude_proteins=exclude_set,
         )
 
 
@@ -1723,6 +1728,7 @@ def run_analysis_for_scorer(
     target: str = "rmsf",
     transform: str = "none",
     consurf_dir: Optional[str] = None,
+    exclude_proteins: Optional[set] = None,
 ):
     """Run the full correlation analysis for one scorer."""
     rob_col = robustness_col  # short alias used throughout
@@ -1742,6 +1748,14 @@ def run_analysis_for_scorer(
         d.name for d in atlas_proteins_dir.iterdir()
         if d.is_dir() and (d / ".done").exists()
     ])
+
+    # Apply exclusion filter
+    if exclude_proteins:
+        n_before = len(protein_ids)
+        protein_ids = [p for p in protein_ids if p not in exclude_proteins]
+        n_excluded = n_before - len(protein_ids)
+        if n_excluded > 0:
+            print(f"Excluded {n_excluded} proteins from {dataset_label}")
 
     if max_proteins > 0:
         protein_ids = protein_ids[:max_proteins]

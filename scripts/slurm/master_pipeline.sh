@@ -36,6 +36,9 @@ source "${SCRIPT_DIR}/config.sh"
 
 ACCOUNT="-A orzuk"
 
+# --- PDB designs: exclude natural proteins that passed keyword filter ---
+PDB_EXCLUDE="2GAR_A 2IP6_A 2QSB_A 3F4M_A 4GXT_A 5ZEO_A 7AM3_A 7AM4_A 3NED_A 3NF0_A 3U8V_A 8A3K_UNK"
+
 # --- RCI-S2 paths ---
 RCI_CSV="${PROJECT_DIR}/data/gradation_nmr/zenodo_submission_v2/rci/rci_final.csv"
 RCI_PDB_DIR="${PROJECT_DIR}/data/gradation_nmr/zenodo_submission_v2/rci/pdb_files"
@@ -359,13 +362,13 @@ if should_run 5; then
             --wrap="bash -c 'source ${VENV_DIR}/bin/activate && cd ${REPO_DIR} && python scripts/correlate_robustness_dynamics.py --atlas_dir ${BBFLOW_PROCESSED} --robustness_dir ${BBFLOW_ROBUSTNESS} --scorer ${SCORER} --output_dir ${BBFLOW_ANALYSIS} --no_dssp ${CONSURF_FLAG}'"
     done
 
-    # PDB designs
+    # PDB designs (exclude natural proteins that passed keyword filter)
     for SCORER in thermompnn esm1v; do
         echo -n "  PDB designs ${SCORER}: "
         submit_job ${ACCOUNT} --partition=${CPU_PARTITION} --time=02:00:00 --mem=16G --cpus-per-task=4 \
             --job-name=corr_p_${SCORER:0:1} --output="${LOG_DIR}/corr_pdb_${SCORER}_%j.out" \
             $DEP \
-            --wrap="bash -c 'source ${VENV_DIR}/bin/activate && cd ${REPO_DIR} && python scripts/correlate_robustness_dynamics.py --atlas_dir ${PDB_DESIGNS_DIR} --robustness_dir ${PDB_DESIGNS_ROBUSTNESS} --scorer ${SCORER} --output_dir ${PDB_DESIGNS_ANALYSIS} --target bfactor ${CONSURF_FLAG}'"
+            --wrap="bash -c 'source ${VENV_DIR}/bin/activate && cd ${REPO_DIR} && python scripts/correlate_robustness_dynamics.py --atlas_dir ${PDB_DESIGNS_DIR} --robustness_dir ${PDB_DESIGNS_ROBUSTNESS} --scorer ${SCORER} --output_dir ${PDB_DESIGNS_ANALYSIS} --target bfactor --exclude ${PDB_EXCLUDE} ${CONSURF_FLAG}'"
     done
 
     # RCI-S2
@@ -411,7 +414,7 @@ if should_run 6; then
     submit_job ${ACCOUNT} --partition=${CPU_PARTITION} --time=01:00:00 --mem=16G --cpus-per-task=4 \
         --job-name=mddg_p --output="${LOG_DIR}/mddg_pdb_%j.out" \
         $DEP \
-        --wrap="bash -c 'source ${VENV_DIR}/bin/activate && cd ${REPO_DIR} && python scripts/multi_ddg_regression.py --atlas_dir ${PDB_DESIGNS_DIR} --robustness_dir ${PDB_DESIGNS_ROBUSTNESS} --scorer thermompnn --target bfactor --output_dir ${PDB_DESIGNS_ANALYSIS}'"
+        --wrap="bash -c 'source ${VENV_DIR}/bin/activate && cd ${REPO_DIR} && python scripts/multi_ddg_regression.py --atlas_dir ${PDB_DESIGNS_DIR} --robustness_dir ${PDB_DESIGNS_ROBUSTNESS} --scorer thermompnn --target bfactor --output_dir ${PDB_DESIGNS_ANALYSIS} --exclude ${PDB_EXCLUDE}'"
 
     echo -n "  RCI-S2 B-factor: "
     submit_job ${ACCOUNT} --partition=${CPU_PARTITION} --time=04:00:00 --mem=32G --cpus-per-task=4 \

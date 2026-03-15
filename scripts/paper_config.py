@@ -55,7 +55,26 @@ class Dataset:
     n_proteins_approx: int = 0
     bfactor_only: bool = False     # pass --target bfactor to correlate script
     has_plddt: bool = True
+    exclude_proteins: List[str] = field(default_factory=list)
 
+
+# Natural proteins that passed the keyword-based PDB design filter
+# but are actually natural or natural-scaffold variants (identified via
+# ConSurf-DB coverage and PDB TITLE inspection).
+PDB_DESIGNS_EXCLUDE = [
+    "2GAR_A",   # natural enzyme (pH-dependent active site loop)
+    "2IP6_A",   # natural protein (PEDB)
+    "2QSB_A",   # natural protein (uncharacterized family UPF0147)
+    "3F4M_A",   # natural protein (TIPE2)
+    "4GXT_A",   # natural protein (conserved functionally unknown)
+    "5ZEO_A",   # natural protein (sperm whale myoglobin mutant)
+    "7AM3_A",   # natural enzyme variant (peptiligase mutant)
+    "7AM4_A",   # natural enzyme variant (peptiligase mutant)
+    "3NED_A",   # ambiguous (mRouge fluorescent protein, no design keywords)
+    "3NF0_A",   # ambiguous (mPlum fluorescent protein variant)
+    "3U8V_A",   # ambiguous (small metal binding protein)
+    "8A3K_UNK", # ambiguous (no title, unknown chain)
+]
 
 DATASETS = {
     "atlas": Dataset(
@@ -87,9 +106,10 @@ DATASETS = {
         dataset_type="designed",
         available_targets=["bfactor"],
         available_scorers=["esm1v", "thermompnn"],
-        n_proteins_approx=317,
+        n_proteins_approx=306,
         bfactor_only=True,
         has_plddt=True,  # pLDDT from ESMFold predictions
+        exclude_proteins=PDB_DESIGNS_EXCLUDE,
     ),
     "rci_s2": Dataset(
         name="rci_s2",
