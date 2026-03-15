@@ -22,6 +22,7 @@ PDB_DIR=$PROJECT_DIR/data/gradation_nmr/zenodo_submission_v2/rci/pdb_files
 OUTPUT_DIR=$PROJECT_DIR/data/rci_s2_processed
 RCI_ROBUSTNESS_DIR=$PROJECT_DIR/data/rci_s2_robustness
 RCI_ANALYSIS_DIR=$PROJECT_DIR/data/rci_s2_analysis
+CONSURF_DIR=$PROJECT_DIR/data/ConSurf
 
 STEP=${1:?Usage: bash scripts/slurm/10_rci_s2_pipeline.sh [preprocess|thermompnn|esm1v|all_analysis|collect]}
 
@@ -214,7 +215,8 @@ python scripts/correlate_robustness_dynamics.py \\
     --robustness_dir $RCI_ROBUSTNESS_DIR \\
     --scorer thermompnn \\
     --output_dir $RCI_ANALYSIS_DIR \\
-    --target bfactor
+    --target bfactor \\
+    --consurf_dir $CONSURF_DIR
 
 echo "Finished: \$(date)"
 EOF
@@ -245,7 +247,8 @@ python scripts/correlate_robustness_dynamics.py \\
     --robustness_dir $RCI_ROBUSTNESS_DIR \\
     --scorer esm1v \\
     --output_dir $RCI_ANALYSIS_DIR \\
-    --target bfactor
+    --target bfactor \\
+    --consurf_dir $CONSURF_DIR
 
 echo "Finished: \$(date)"
 EOF

@@ -29,6 +29,7 @@ class ClusterPaths:
     venv: str = "/sci/labs/orzuk/orzuk/projects/ProteinStability/envs/robustness"
     log_dir: str = "/sci/labs/orzuk/orzuk/projects/ProteinStability/logs"
     paper_results_dir: str = "/sci/labs/orzuk/orzuk/projects/ProteinStability/data/paper_results"
+    consurf_dir: str = "/sci/labs/orzuk/orzuk/projects/ProteinStability/data/ConSurf"
 
     @property
     def scripts_dir(self):

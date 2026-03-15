@@ -6,20 +6,21 @@ set -e
 cd /sci/labs/orzuk/orzuk/github/meira_thesis
 source /sci/labs/orzuk/orzuk/projects/ProteinStability/envs/robustness/bin/activate
 P=/sci/labs/orzuk/orzuk/projects/ProteinStability
+CONSURF=$P/data/ConSurf
 
 echo "Started at $(date)"
 
 echo "=== 1/9: Correlations - PDB designs ThermoMPNN ==="
-python scripts/correlate_robustness_dynamics.py --atlas_dir $P/data/pdb_designs --robustness_dir $P/data/pdb_designs_robustness --scorer thermompnn --output_dir $P/data/pdb_designs_analysis --target bfactor
+python scripts/correlate_robustness_dynamics.py --atlas_dir $P/data/pdb_designs --robustness_dir $P/data/pdb_designs_robustness --scorer thermompnn --output_dir $P/data/pdb_designs_analysis --target bfactor --consurf_dir $CONSURF
 
 echo "=== 2/9: Correlations - PDB designs ESM-1v ==="
-python scripts/correlate_robustness_dynamics.py --atlas_dir $P/data/pdb_designs --robustness_dir $P/data/pdb_designs_robustness --scorer esm1v --output_dir $P/data/pdb_designs_analysis --target bfactor
+python scripts/correlate_robustness_dynamics.py --atlas_dir $P/data/pdb_designs --robustness_dir $P/data/pdb_designs_robustness --scorer esm1v --output_dir $P/data/pdb_designs_analysis --target bfactor --consurf_dir $CONSURF
 
 echo "=== 3/9: Correlations - ATLAS (ThermoMPNN + ESM-1v) ==="
-python scripts/correlate_robustness_dynamics.py --atlas_dir $P/data/atlas --robustness_dir $P/data/atlas_robustness --scorer thermompnn esm1v --output_dir $P/data/atlas_analysis
+python scripts/correlate_robustness_dynamics.py --atlas_dir $P/data/atlas --robustness_dir $P/data/atlas_robustness --scorer thermompnn esm1v --output_dir $P/data/atlas_analysis --consurf_dir $CONSURF
 
 echo "=== 4/9: Correlations - BBFlow (ThermoMPNN + ESM-1v) ==="
-python scripts/correlate_robustness_dynamics.py --atlas_dir $P/data/bbflow_processed --robustness_dir $P/data/bbflow_robustness --scorer thermompnn esm1v --output_dir $P/data/bbflow_analysis
+python scripts/correlate_robustness_dynamics.py --atlas_dir $P/data/bbflow_processed --robustness_dir $P/data/bbflow_robustness --scorer thermompnn esm1v --output_dir $P/data/bbflow_analysis --consurf_dir $CONSURF
 
 echo "=== 5/9: Multi-DDG - ATLAS RMSF ==="
 python scripts/multi_ddg_regression.py --atlas_dir $P/data/atlas --robustness_dir $P/data/atlas_robustness --scorer thermompnn --target rmsf --output_dir $P/data/atlas_analysis

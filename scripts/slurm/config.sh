@@ -37,6 +37,9 @@ export PDB_DESIGNS_DIR="${PROJECT_DIR}/data/pdb_designs"
 export PDB_DESIGNS_ROBUSTNESS="${PROJECT_DIR}/data/pdb_designs_robustness"
 export PDB_DESIGNS_ANALYSIS="${PROJECT_DIR}/data/pdb_designs_analysis"
 
+# --- ConSurf-DB conservation scores ---
+export CONSURF_DIR="${PROJECT_DIR}/data/ConSurf"
+
 # --- SLURM settings ---
 export GPU_PARTITION="catfish"
 export CPU_PARTITION="glacier"

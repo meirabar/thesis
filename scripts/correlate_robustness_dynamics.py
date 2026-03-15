@@ -148,22 +148,103 @@ def load_robustness_global(robustness_dir: str, scorer: str, protein_id: str
     return data.get("global_metrics")
 
 
-def load_conservation(protein_dir: str) -> Optional[pd.DataFrame]:
-    """Load per-residue evolutionary conservation scores.
+def _load_consurf_mapping(consurf_dir: str) -> dict:
+    """Load identical_to_unique_dict.txt mapping from ConSurf-DB.
 
-    Looks for a ConSurf-style TSV file (*_conservation.tsv or *_consurf.tsv)
-    in the protein directory.  Expected columns include a numeric conservation
-    score (e.g. 'conservation_score', 'consurf_score', or simply 'score').
-    ConSurf scores range 1-9 (9 = most conserved).
+    Returns dict mapping pdb_chain (lowercase) -> unique pdb_chain (lowercase).
+    """
+    dict_path = Path(consurf_dir) / "identical_to_unique_dict.txt"
+    mapping = {}
+    if not dict_path.exists():
+        return mapping
+    with open(dict_path) as f:
+        for line in f:
+            line = line.strip()
+            if ":" not in line:
+                continue
+            ident, unique = line.split(":", 1)
+            if len(ident) >= 5 and len(unique) >= 5:
+                # Format: "104LB" -> pdb="104L", chain="B" -> "104l_b"
+                pdb_i, chain_i = ident[:-1].lower(), ident[-1].lower()
+                pdb_u, chain_u = unique[:-1].lower(), unique[-1].lower()
+                mapping[f"{pdb_i}_{chain_i}"] = f"{pdb_u}_{chain_u}"
+    return mapping
+
+
+# Module-level cache for ConSurf mapping (loaded once per run)
+_CONSURF_MAPPING: Optional[dict] = None
+
+
+def load_conservation(protein_dir: str, consurf_dir: Optional[str] = None,
+                      protein_id: Optional[str] = None) -> Optional[pd.DataFrame]:
+    """Load per-residue evolutionary conservation scores from ConSurf-DB.
+
+    Looks for a ConSurf JSON file in consurf_dir (central ConSurf-DB directory).
+    Falls back to per-protein TSV files in protein_dir for backward compatibility.
+
+    ConSurf JSON contains SCORE (continuous Rate4Site score, negative=conserved)
+    and COLOR (discrete 1-9 grade, 9=most conserved).
+    We use SCORE as the conservation measure.
 
     Returns DataFrame with columns: position, conservation.
     """
-    # Try several naming conventions
+    global _CONSURF_MAPPING
+
+    # --- Try ConSurf-DB JSON (preferred) ---
+    if consurf_dir is not None and protein_id is not None:
+        consurf_path = Path(consurf_dir)
+
+        # Try direct match (case-insensitive: try original, upper, various combos)
+        pid_parts = protein_id.split("_")
+        if len(pid_parts) == 2:
+            pdb, chain = pid_parts
+            candidates = [
+                f"{pdb.upper()}_{chain.upper()}_consurf_info.json",
+                f"{pdb.upper()}_{chain}_consurf_info.json",
+                f"{pdb.lower()}_{chain}_consurf_info.json",
+                f"{pdb}_{chain}_consurf_info.json",
+            ]
+            json_path = None
+            for cand in candidates:
+                p = consurf_path / cand
+                if p.exists():
+                    json_path = p
+                    break
+
+            # If not found directly, try the identical_to_unique mapping
+            if json_path is None:
+                if _CONSURF_MAPPING is None:
+                    _CONSURF_MAPPING = _load_consurf_mapping(consurf_dir)
+                pid_lower = protein_id.lower()
+                if pid_lower in _CONSURF_MAPPING:
+                    mapped = _CONSURF_MAPPING[pid_lower]
+                    mpdb, mchain = mapped.split("_")
+                    mapped_file = f"{mpdb.upper()}_{mchain.upper()}_consurf_info.json"
+                    p = consurf_path / mapped_file
+                    if p.exists():
+                        json_path = p
+
+            if json_path is not None:
+                try:
+                    with open(json_path) as f:
+                        data = json.load(f)
+                    scores = data.get("SCORE", [])
+                    if scores:
+                        result = pd.DataFrame()
+                        result["position"] = range(1, len(scores) + 1)
+                        result["conservation"] = [
+                            float(s) if s is not None else np.nan for s in scores
+                        ]
+                        return result
+                except (json.JSONDecodeError, KeyError, ValueError) as e:
+                    print(f"  Warning: ConSurf JSON parse error for {protein_id}: {e}")
+
+    # --- Fallback: per-protein TSV files (legacy) ---
     for suffix in ("_conservation.tsv", "_consurf.tsv", "_ConSurf.tsv"):
         df = load_atlas_tsv(protein_dir, suffix)
         if df is not None:
             break
-    if df is None:
+    else:
         return None
 
     # Find the conservation score column
@@ -171,7 +252,6 @@ def load_conservation(protein_dir: str) -> Optional[pd.DataFrame]:
                   if any(kw in c.lower()
                          for kw in ("conservation", "consurf", "score"))]
     if not score_cols:
-        # Fall back to first numeric column
         numeric = [c for c in df.columns
                    if df[c].dtype in (np.float64, np.float32, float, int, np.int64)]
         score_cols = numeric[-1:] if numeric else []
@@ -1593,6 +1673,9 @@ def main():
                              "'log1p' applies log(1+x) to reduce heavy-tail effects. "
                              "Does not affect Spearman correlations (rank-invariant). "
                              "(default: none)")
+    parser.add_argument("--consurf_dir", type=str, default=None,
+                        help="Path to ConSurf-DB directory containing JSON files "
+                             "and identical_to_unique_dict.txt")
     args = parser.parse_args()
 
     for scorer in args.scorer:
@@ -1613,6 +1696,7 @@ def main():
             robustness_col=args.robustness_col,
             target=args.target,
             transform=args.transform,
+            consurf_dir=args.consurf_dir,
         )
 
 
@@ -1629,6 +1713,7 @@ def run_analysis_for_scorer(
     robustness_col: str = "std_ddg",
     target: str = "rmsf",
     transform: str = "none",
+    consurf_dir: Optional[str] = None,
 ):
     """Run the full correlation analysis for one scorer."""
     rob_col = robustness_col  # short alias used throughout
@@ -1712,7 +1797,8 @@ def run_analysis_for_scorer(
                     print(f"  Warning: SASA computation failed for {pid}: {e}")
 
         # Load conservation scores (if available)
-        conservation_df = load_conservation(protein_dir)
+        conservation_df = load_conservation(protein_dir, consurf_dir=consurf_dir,
+                                            protein_id=pid)
 
         # Correlate
         result = correlate_single_protein(
