@@ -467,11 +467,13 @@ def generate_fig3(results: dict, output_dir: Path):
             coef_dict = dict(zip(feat_names, coefs))
             vals = [coef_dict.get(f, 0) for f in ALL_FEATURES]
 
-            # Error bars from std across CV folds (show 2*std for visibility)
+            # Error bars: prefer theoretical SE, fallback to CV std
+            coefs_se = ridge.get("feature_coefs_se")
             coefs_std = ridge.get("feature_coefs_std")
-            if coefs_std:
-                std_dict = dict(zip(feat_names, coefs_std))
-                errs = [2 * std_dict.get(f, 0) for f in ALL_FEATURES]
+            err_source = coefs_se or coefs_std
+            if err_source:
+                err_dict = dict(zip(feat_names, err_source))
+                errs = [2 * err_dict.get(f, 0) for f in ALL_FEATURES]
             else:
                 errs = None
 

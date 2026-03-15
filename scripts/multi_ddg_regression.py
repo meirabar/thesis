@@ -192,7 +192,8 @@ class RegressionResult:
     # Feature importance (for multi-DDG model)
     feature_names: List[str] = None
     feature_coefs_mean: List[float] = None
-    feature_coefs_std: List[float] = None
+    feature_coefs_std: List[float] = None       # empirical std across CV folds
+    feature_coefs_se: List[float] = None        # theoretical SE from Ridge covariance
 
 
 def build_dataset(
@@ -622,14 +623,48 @@ def run_cv_regression(
             res.feature_coefs_mean = [float(x) for x in np.mean(fold_coefs, axis=0)]
             res.feature_coefs_std = [float(x) for x in np.std(fold_coefs, axis=0)]
 
+        # Theoretical SE: fit on all data, compute Ridge covariance matrix
+        # Var(beta) = sigma^2 * (X'X + lambda*I)^{-1} X'X (X'X + lambda*I)^{-1}
+        try:
+            X_all_parts, y_all_parts = [], []
+            for entry in dataset:
+                X = extractor(entry)
+                if X is not None:
+                    X_all_parts.append(X)
+                    y_all_parts.append(entry["target"])
+            if X_all_parts:
+                X_all = np.nan_to_num(np.vstack(X_all_parts), nan=0.0)
+                y_all = np.concatenate(y_all_parts)
+                if use_ridge:
+                    reg_full = Ridge(alpha=alpha).fit(X_all, y_all)
+                else:
+                    reg_full = LinearRegression().fit(X_all, y_all)
+                resid = y_all - reg_full.predict(X_all)
+                sigma2 = float(np.sum(resid**2) / (len(y_all) - X_all.shape[1]))
+                XtX = X_all.T @ X_all
+                if use_ridge:
+                    A_inv = np.linalg.inv(XtX + alpha * np.eye(X_all.shape[1]))
+                    cov_beta = sigma2 * A_inv @ XtX @ A_inv
+                else:
+                    cov_beta = sigma2 * np.linalg.inv(XtX)
+                se = np.sqrt(np.diag(cov_beta))
+                res.feature_coefs_se = [float(x) for x in se]
+        except Exception as e:
+            print(f"    Warning: could not compute theoretical SE: {e}")
+
         print(f"    CV R²: {res.cv_r2_mean:.4f} ± {res.cv_r2_std:.4f}")
         print(f"    CV rho: {res.cv_rho_mean:.4f} ± {res.cv_rho_std:.4f}")
         print(f"    Per-protein median rho: {res.cv_per_protein_rho_median:.4f}")
 
         if res.feature_coefs_mean and len(res.feature_coefs_mean) <= 25:
-            print(f"    Coefficients:")
-            for name, coef in zip(res.feature_names, res.feature_coefs_mean):
-                print(f"      {name:6s}: {coef:+.4f}")
+            print(f"    Coefficients (mean ± CV-std | theoretical SE):")
+            se_list = res.feature_coefs_se or [None] * len(res.feature_coefs_mean)
+            std_list = res.feature_coefs_std or [None] * len(res.feature_coefs_mean)
+            for name, coef, sd, se in zip(res.feature_names, res.feature_coefs_mean,
+                                           std_list, se_list):
+                se_str = f"SE={se:.4f}" if se is not None else "SE=N/A"
+                sd_str = f"±{sd:.4f}" if sd is not None else ""
+                print(f"      {name:12s}: {coef:+.4f} {sd_str}  ({se_str})")
 
         results[model_name] = res
 
