@@ -238,15 +238,26 @@ def generate_fig1(results: dict, output_dir: Path):
 # FIGURE 2: 2D density scatter with marginals (4 panels)
 # ============================================================================
 
-def generate_fig2(results: dict, output_dir: Path):
-    """2D density scatter plots with marginal distributions, one per dataset-target."""
-    n_panels = len(FIG2_PANELS)
+TARGET_UNITS = {
+    "rmsf": r"RMSF ($\AA$)",
+    "bfactor": r"B-factor ($\AA^2$)",
+}
+
+
+def _density_scatter_panels(panels, fig, use_raw: bool):
+    """Shared logic for Fig 2 and Supp Fig 1: hexbin + marginals.
+
+    Parameters
+    ----------
+    panels : list of (ds_name, target) tuples
+    fig : matplotlib Figure
+    use_raw : if True, plot raw units; if False, plot z-scored
+    """
+    n_panels = len(panels)
     n_cols = 2
-    n_rows = (n_panels + n_cols - 1) // n_cols  # ceil division
+    n_rows = (n_panels + n_cols - 1) // n_cols
 
-    fig = plt.figure(figsize=(20, 9 * n_rows))
-
-    for panel_idx, (ds_name, target) in enumerate(FIG2_PANELS):
+    for panel_idx, (ds_name, target) in enumerate(panels):
         ds = DATASETS[ds_name]
         if target == "rmsf":
             target_label = "RMSF"
@@ -255,7 +266,6 @@ def generate_fig2(results: dict, output_dir: Path):
         else:
             target_label = "B-factor"
 
-        # Load pooled z-scored data
         pooled = _load_pooled_data(ds_name, "thermompnn")
         if pooled.empty:
             continue
@@ -264,19 +274,27 @@ def generate_fig2(results: dict, output_dir: Path):
         if target_data.empty:
             continue
 
-        # Subsample for plotting
         n_max = 50000
         if len(target_data) > n_max:
             target_data = target_data.sample(n_max, random_state=42)
 
-        x = target_data["robustness_z"].values
-        y = target_data["target_z"].values
+        if use_raw:
+            x = target_data["robustness_raw"].values
+            y = target_data["target_raw"].values
+            x_label = r"$\operatorname{std}(\Delta\Delta G)$ (kcal/mol)"
+            if ds_name == "rci_s2":
+                y_label = r"$1 - S^2_\mathrm{RCI}$"
+            else:
+                y_label = TARGET_UNITS.get(target, target_label)
+        else:
+            x = target_data["robustness_z"].values
+            y = target_data["target_z"].values
+            x_label = r"$\operatorname{std}(\Delta\Delta G)$ (z-scored)"
+            y_label = f"{target_label} (z-scored)"
 
-        # Clip y-axis to remove heavy tail
         y_clip = np.percentile(y, 99)
         y_floor = np.percentile(y, 1)
 
-        # Remap panel positions for n_rows x n_cols layout
         row = panel_idx // n_cols
         col = panel_idx % n_cols
 
@@ -292,18 +310,16 @@ def generate_fig2(results: dict, output_dir: Path):
         ax_top = fig.add_subplot(gs_inner[0, :-1], sharex=ax_main)
         ax_right = fig.add_subplot(gs_inner[1:, -1], sharey=ax_main)
 
-        # 2D density (hexbin)
         mask = (y >= y_floor) & (y <= y_clip)
         hb = ax_main.hexbin(x[mask], y[mask], gridsize=40, cmap="Blues",
                              mincnt=1, linewidths=0.2)
         cb = fig.colorbar(hb, ax=ax_right, pad=0.1, shrink=0.8)
         cb.set_label("Count", fontsize=11)
         cb.ax.tick_params(labelsize=10)
-        ax_main.set_xlabel(r"$\operatorname{std}(\Delta\Delta G)$ (z-scored)")
-        ax_main.set_ylabel(f"{target_label} (z-scored)")
+        ax_main.set_xlabel(x_label)
+        ax_main.set_ylabel(y_label)
         ax_main.set_ylim(y_floor, y_clip)
 
-        # Marginal distributions
         ax_top.hist(x, bins=50, color="tab:blue", alpha=0.7, density=True)
         ax_top.set_ylabel("Density")
         plt.setp(ax_top.get_xticklabels(), visible=False)
@@ -313,12 +329,18 @@ def generate_fig2(results: dict, output_dir: Path):
         ax_right.set_xlabel("Density")
         plt.setp(ax_right.get_yticklabels(), visible=False)
 
-        # Title
         rho = scipy_stats.spearmanr(x, y)[0]
         ax_top.set_title(f"{ds.display_name} {target_label} "
                          f"($\\rho = {rho:.3f}$, $n = {len(x):,}$)",
                          fontsize=14, fontweight="bold")
 
+
+def generate_fig2(results: dict, output_dir: Path):
+    """2D density scatter plots with marginal distributions, one per dataset-target."""
+    n_panels = len(FIG2_PANELS)
+    n_rows = (n_panels + 1) // 2
+    fig = plt.figure(figsize=(20, 9 * n_rows))
+    _density_scatter_panels(FIG2_PANELS, fig, use_raw=False)
     for ext in ["pdf", "png"]:
         fig.savefig(output_dir / f"fig2_density_scatter.{ext}",
                     dpi=150, bbox_inches="tight")
@@ -483,76 +505,11 @@ def generate_fig4(results: dict, output_dir: Path):
 
 
 def generate_supp_fig1(results: dict, output_dir: Path):
-    """Raw (un-normalized) scatter of robustness vs dynamics, motivating z-scoring."""
-    TARGET_UNITS = {
-        "rmsf": r"RMSF ($\AA$)",
-        "bfactor": r"B-factor ($\AA^2$)",
-    }
-
+    """Raw (un-normalized) density scatter -- same layout as Fig 2 but raw units."""
     n_panels = len(FIG2_PANELS)
-    n_cols = 2
-    n_rows = (n_panels + n_cols - 1) // n_cols
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(10 * n_cols, 8 * n_rows))
-    axes = np.atleast_2d(axes)
-
-    for panel_idx, (ds_name, target) in enumerate(FIG2_PANELS):
-        ds = DATASETS[ds_name]
-        if target == "rmsf":
-            target_label = "RMSF"
-        elif ds_name == "rci_s2":
-            target_label = r"$1{-}S^2_\mathrm{RCI}$"
-        else:
-            target_label = "B-factor"
-
-        row, col = panel_idx // n_cols, panel_idx % n_cols
-        ax = axes[row, col]
-
-        pooled = _load_pooled_data(ds_name, "thermompnn")
-        if pooled.empty:
-            ax.set_title(f"{ds.display_name} {target_label}\n(no data)")
-            continue
-
-        target_data = pooled[pooled["target_type"] == target]
-        if target_data.empty:
-            ax.set_title(f"{ds.display_name} {target_label}\n(no data)")
-            continue
-
-        # Subsample for plotting
-        n_max = 50000
-        if len(target_data) > n_max:
-            target_data = target_data.sample(n_max, random_state=42)
-
-        x = target_data["robustness_raw"].values
-        y = target_data["target_raw"].values
-
-        # Color by protein to show between-protein dominance
-        pids = target_data["protein_id"].values
-        unique_pids = np.unique(pids)
-        pid_colors = {p: i for i, p in enumerate(unique_pids)}
-        c = np.array([pid_colors[p] for p in pids])
-
-        ax.scatter(x, y, alpha=0.05, s=2, c=c, cmap="tab20", rasterized=True)
-
-        rho = scipy_stats.spearmanr(x, y)[0]
-        r_pearson = np.corrcoef(x, y)[0, 1]
-        n_proteins = len(unique_pids)
-
-        ax.set_title(f"{ds.display_name} {target_label}\n"
-                     f"Spearman $\\rho = {rho:.3f}$, Pearson $r = {r_pearson:.3f}$, "
-                     f"$n = {len(x):,}$ residues, {n_proteins} proteins",
-                     fontsize=11)
-        ax.set_xlabel(r"$\operatorname{std}(\Delta\Delta G)$ (kcal/mol)")
-        if ds_name == "rci_s2":
-            ax.set_ylabel(r"$1 - S^2_\mathrm{RCI}$ (unitless)")
-        else:
-            ax.set_ylabel(TARGET_UNITS.get(target, target_label))
-
-    # Remove empty axes
-    for idx in range(n_panels, n_rows * n_cols):
-        row, col = idx // n_cols, idx % n_cols
-        axes[row, col].set_visible(False)
-
-    plt.tight_layout()
+    n_rows = (n_panels + 1) // 2
+    fig = plt.figure(figsize=(20, 9 * n_rows))
+    _density_scatter_panels(FIG2_PANELS, fig, use_raw=True)
     for ext in ["pdf", "png"]:
         fig.savefig(output_dir / f"supp_fig1_raw_scatter.{ext}",
                     dpi=150, bbox_inches="tight")
