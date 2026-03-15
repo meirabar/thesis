@@ -193,6 +193,10 @@ def load_conservation(protein_dir: str, consurf_dir: Optional[str] = None,
     # --- Try ConSurf-DB JSON (preferred) ---
     if consurf_dir is not None and protein_id is not None:
         consurf_path = Path(consurf_dir)
+        # Look in both consurf_dir and consurf_dir/files/ (ConSurf-DB layout)
+        search_dirs = [consurf_path]
+        if (consurf_path / "files").is_dir():
+            search_dirs.append(consurf_path / "files")
 
         # Try direct match (case-insensitive: try original, upper, various combos)
         pid_parts = protein_id.split("_")
@@ -206,9 +210,12 @@ def load_conservation(protein_dir: str, consurf_dir: Optional[str] = None,
             ]
             json_path = None
             for cand in candidates:
-                p = consurf_path / cand
-                if p.exists():
-                    json_path = p
+                for sdir in search_dirs:
+                    p = sdir / cand
+                    if p.exists():
+                        json_path = p
+                        break
+                if json_path is not None:
                     break
 
             # If not found directly, try the identical_to_unique mapping
@@ -220,9 +227,11 @@ def load_conservation(protein_dir: str, consurf_dir: Optional[str] = None,
                     mapped = _CONSURF_MAPPING[pid_lower]
                     mpdb, mchain = mapped.split("_")
                     mapped_file = f"{mpdb.upper()}_{mchain.upper()}_consurf_info.json"
-                    p = consurf_path / mapped_file
-                    if p.exists():
-                        json_path = p
+                    for sdir in search_dirs:
+                        p = sdir / mapped_file
+                        if p.exists():
+                            json_path = p
+                            break
 
             if json_path is not None:
                 try:
