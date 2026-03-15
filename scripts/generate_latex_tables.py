@@ -132,7 +132,7 @@ def generate_table1(results: dict) -> str:
     lines.append(r"\begin{table}[htbp]")
     lines.append(r"\centering")
     lines.append(r"\caption{Bivariate correlations, incremental variance explained,")
-    lines.append(r"and partial correlations between per-residue predictors and dynamics")
+    lines.append(r"partial correlations, and conservation analysis between per-residue predictors and dynamics")
     lines.append(r"targets across all dataset--target combinations.")
     lines.append(r"\emph{Median per-protein $\rho$}: median across proteins of the")
     lines.append(r"within-protein Spearman rank correlation.")
@@ -292,7 +292,8 @@ def generate_table1(results: dict) -> str:
 
     # --- Partial rho ---
     lines.append(r"\multicolumn{" + str(n_cols + 1) + r"}{l}{\textit{Partial $\rho$ (ThermoMPNN $|$ confounder)}} \\")
-    for conf, label in [("plddt", r"$|$\,pLDDT"), ("sasa", r"$|$\,SASA")]:
+    for conf, label in [("plddt", r"$|$\,pLDDT"), ("sasa", r"$|$\,SASA"),
+                         ("conservation", r"$|$\,Conservation")]:
         row = [r"\quad " + label]
         for ds_name, target in TABLE1_COLUMNS:
             run = _get_run(results, ds_name, "thermompnn", target)
@@ -300,6 +301,31 @@ def generate_table1(results: dict) -> str:
             val = _get_corr(run, field)
             row.append(_signed(val))
         lines.append(" & ".join(row) + r" \\")
+    lines.append(r"\midrule")
+
+    # --- Conservation baseline correlations ---
+    lines.append(r"\multicolumn{" + str(n_cols + 1) + r"}{l}{\textit{Conservation (ConSurf Rate4Site)}} \\")
+    # Conservation vs dynamics baseline
+    row_cons = [r"\quad $\rho$(conservation, target)"]
+    for ds_name, target in TABLE1_COLUMNS:
+        run = _get_run(results, ds_name, "thermompnn", target)
+        val = _get_corr(run, "pooled_rho_conservation")
+        row_cons.append(_signed(val))
+    lines.append(" & ".join(row_cons) + r" \\")
+    # Robustness vs conservation (collinearity)
+    row_col = [r"\quad $\rho$(robustness, conservation)"]
+    for ds_name, target in TABLE1_COLUMNS:
+        run = _get_run(results, ds_name, "thermompnn", target)
+        val = _get_corr(run, "pooled_rho_robustness_conservation")
+        row_col.append(_signed(val))
+    lines.append(" & ".join(row_col) + r" \\")
+    # Delta R² over conservation
+    row_dr2 = [r"\quad $\Delta R^2$ over conservation"]
+    for ds_name, target in TABLE1_COLUMNS:
+        run = _get_run(results, ds_name, "thermompnn", target)
+        val = _get_corr(run, "pooled_delta_r2_over_conservation")
+        row_dr2.append(_signed(val) if val is not None else "---")
+    lines.append(" & ".join(row_dr2) + r" \\")
     lines.append(r"\midrule")
 
     # --- Frac beats pLDDT ---

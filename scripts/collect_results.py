@@ -89,6 +89,13 @@ def collect_correlation_run(run) -> dict:
             "pooled_r2_joint_sasa": _get("pooled_r2_joint_sasa"),
             "pooled_partial_rho_sasa": _get("pooled_rho_robustness_rmsf_partial_sasa"),
             "pooled_partial_rho_plddt": _get("pooled_rho_robustness_rmsf_partial_plddt"),
+            # Conservation as covariate
+            "pooled_rho_conservation": _get("pooled_rho_conservation_rmsf"),
+            "pooled_r2_conservation": _get("pooled_r2_conservation_rmsf"),
+            "pooled_rho_robustness_conservation": _get("pooled_rho_robustness_conservation"),
+            "pooled_partial_rho_conservation": _get("pooled_rho_robustness_rmsf_partial_conservation"),
+            "pooled_r2_joint_conservation": _get("pooled_r2_joint_conservation"),
+            "pooled_delta_r2_over_conservation": _get("pooled_delta_r2_over_conservation"),
         }
         per_prot = {
             "median_rho_robustness": _get("median_rho_robustness_rmsf"),
@@ -97,6 +104,9 @@ def collect_correlation_run(run) -> dict:
             "median_rho_partial_sasa": _get("median_rho_partial_sasa"),
             "median_rho_partial_plddt": _get("median_rho_partial_plddt"),
             "frac_robustness_beats_plddt": _get("frac_robustness_beats_plddt"),
+            "median_rho_conservation": _get("median_rho_conservation_rmsf"),
+            "median_rho_robustness_conservation": _get("median_rho_robustness_conservation"),
+            "median_rho_partial_conservation": _get("median_rho_robustness_rmsf_partial_conservation"),
         }
     elif is_bfactor_target:
         # ATLAS B-factor target: use dedicated B-factor-as-target fields
@@ -111,6 +121,13 @@ def collect_correlation_run(run) -> dict:
             "pooled_r2_joint_sasa": _get("pooled_r2_bfactor_joint_sasa"),
             "pooled_partial_rho_sasa": _get("pooled_rho_robustness_bfactor_partial_sasa"),
             "pooled_partial_rho_plddt": _get("pooled_rho_robustness_bfactor_partial_plddt"),
+            # Conservation as covariate
+            "pooled_rho_conservation": _get("pooled_rho_conservation_bfactor"),
+            "pooled_r2_conservation": _get("pooled_r2_conservation_bfactor"),
+            "pooled_rho_robustness_conservation": _get("pooled_rho_robustness_conservation"),
+            "pooled_partial_rho_conservation": _get("pooled_rho_robustness_bfactor_partial_conservation"),
+            "pooled_r2_joint_conservation": _get("pooled_r2_bfactor_joint_conservation"),
+            "pooled_delta_r2_over_conservation": _get("pooled_delta_r2_bfactor_over_conservation"),
         }
         per_prot = {
             "median_rho_robustness": _get("median_rho_robustness_bfactor_target"),
@@ -119,6 +136,9 @@ def collect_correlation_run(run) -> dict:
             "median_rho_partial_sasa": _get("median_rho_robustness_bfactor_partial_sasa"),
             "median_rho_partial_plddt": _get("median_rho_robustness_bfactor_partial_plddt"),
             "frac_robustness_beats_plddt": _get("frac_robustness_beats_plddt_bfactor"),
+            "median_rho_conservation": _get("median_rho_conservation_bfactor"),
+            "median_rho_robustness_conservation": _get("median_rho_robustness_conservation"),
+            "median_rho_partial_conservation": _get("median_rho_robustness_bfactor_partial_conservation"),
         }
     else:
         # RMSF target (default)
@@ -133,6 +153,13 @@ def collect_correlation_run(run) -> dict:
             "pooled_r2_joint_sasa": _get("pooled_r2_joint_sasa"),
             "pooled_partial_rho_sasa": _get("pooled_rho_robustness_rmsf_partial_sasa"),
             "pooled_partial_rho_plddt": _get("pooled_rho_robustness_rmsf_partial_plddt"),
+            # Conservation as covariate
+            "pooled_rho_conservation": _get("pooled_rho_conservation_rmsf"),
+            "pooled_r2_conservation": _get("pooled_r2_conservation_rmsf"),
+            "pooled_rho_robustness_conservation": _get("pooled_rho_robustness_conservation"),
+            "pooled_partial_rho_conservation": _get("pooled_rho_robustness_rmsf_partial_conservation"),
+            "pooled_r2_joint_conservation": _get("pooled_r2_joint_conservation"),
+            "pooled_delta_r2_over_conservation": _get("pooled_delta_r2_over_conservation"),
         }
         per_prot = {
             "median_rho_robustness": _get("median_rho_robustness_rmsf"),
@@ -141,6 +168,9 @@ def collect_correlation_run(run) -> dict:
             "median_rho_partial_sasa": _get("median_rho_partial_sasa"),
             "median_rho_partial_plddt": _get("median_rho_partial_plddt"),
             "frac_robustness_beats_plddt": _get("frac_robustness_beats_plddt"),
+            "median_rho_conservation": _get("median_rho_conservation_rmsf"),
+            "median_rho_robustness_conservation": _get("median_rho_robustness_conservation"),
+            "median_rho_partial_conservation": _get("median_rho_robustness_rmsf_partial_conservation"),
         }
 
     # Compute delta R² values

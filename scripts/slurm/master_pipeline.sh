@@ -430,15 +430,16 @@ if should_run 7; then
     echo "=== STAGE 7: Collect + generate paper outputs ==="
 
     RESULTS_JSON="${PROJECT_DIR}/data/paper_results/unified_results.json"
-    TABLES_DIR="${PROJECT_DIR}/data/paper_results/Tables"
-    FIGURES_DIR="${PROJECT_DIR}/data/paper_results/Figures"
+    OUTPUT_BASE="${PROJECT_DIR}/data/paper_results"
+    TABLES_DIR="${OUTPUT_BASE}/Tables"
+    FIGURES_DIR="${OUTPUT_BASE}/Figures"
 
     # Submit as SLURM job so it chains with previous stages
     echo -n "  Collect + tables + figures: "
     submit_job ${ACCOUNT} --partition=${CPU_PARTITION} --time=00:30:00 --mem=8G --cpus-per-task=2 \
         --job-name=paper_out --output="${LOG_DIR}/paper_output_%j.out" \
         $(dep_flag) \
-        --wrap="bash -c 'source ${VENV_DIR}/bin/activate && cd ${REPO_DIR} && mkdir -p ${TABLES_DIR} ${FIGURES_DIR} && python scripts/collect_results.py --output ${RESULTS_JSON} --verbose && python scripts/generate_latex_tables.py --results ${RESULTS_JSON} --output-dir ${TABLES_DIR} && python scripts/generate_paper_figures.py --results ${RESULTS_JSON} --output-dir ${FIGURES_DIR} && echo Done: tables in ${TABLES_DIR}, figures in ${FIGURES_DIR}'"
+        --wrap="bash -c 'source ${VENV_DIR}/bin/activate && cd ${REPO_DIR} && mkdir -p ${TABLES_DIR} ${FIGURES_DIR} && python scripts/collect_results.py --output ${RESULTS_JSON} --verbose && python scripts/generate_latex_tables.py --results ${RESULTS_JSON} --output-dir ${OUTPUT_BASE} && python scripts/generate_paper_figures.py --results ${RESULTS_JSON} --output-dir ${OUTPUT_BASE} && echo Done: tables in ${TABLES_DIR}, figures in ${FIGURES_DIR}'"
 
     advance_stage
     echo ""
