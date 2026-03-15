@@ -13,7 +13,7 @@ from pathlib import Path
 
 PROJECT = "/sci/labs/orzuk/orzuk/projects/ProteinStability"
 CONSURF_FILES = Path(PROJECT) / "data" / "ConSurf" / "files"
-DESIGNS_DIR = Path(PROJECT) / "data" / "pdb_designs"
+DESIGNS_DIR = Path(PROJECT) / "data" / "pdb_designs" / "proteins"
 MAP_FILE = CONSURF_FILES.parent / "identical_to_unique_dict.txt"
 
 
