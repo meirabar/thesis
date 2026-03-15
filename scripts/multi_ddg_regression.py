@@ -194,6 +194,7 @@ class RegressionResult:
     feature_coefs_mean: List[float] = None
     feature_coefs_std: List[float] = None       # empirical std across CV folds
     feature_coefs_se: List[float] = None        # theoretical SE from Ridge covariance
+    feature_coefs_per_fold: List[List[float]] = None  # [fold_idx][feature_idx]
 
 
 def build_dataset(
@@ -622,6 +623,7 @@ def run_cv_regression(
         if fold_coefs:
             res.feature_coefs_mean = [float(x) for x in np.mean(fold_coefs, axis=0)]
             res.feature_coefs_std = [float(x) for x in np.std(fold_coefs, axis=0)]
+            res.feature_coefs_per_fold = [[float(x) for x in fold] for fold in fold_coefs]
 
         # Theoretical SE: fit on all data, compute Ridge covariance matrix
         # Var(beta) = sigma^2 * (X'X + lambda*I)^{-1} X'X (X'X + lambda*I)^{-1}

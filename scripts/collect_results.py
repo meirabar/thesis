@@ -258,6 +258,7 @@ def collect_multi_ddg_run(run) -> dict:
             "feature_coefs_mean": model_data.get("feature_coefs_mean"),
             "feature_coefs_std": model_data.get("feature_coefs_std"),
             "feature_coefs_se": model_data.get("feature_coefs_se"),
+            "feature_coefs_per_fold": model_data.get("feature_coefs_per_fold"),
         }
 
     # Find best model (highest CV R²)
