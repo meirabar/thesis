@@ -330,11 +330,11 @@ if should_run 5; then
     DEP=$(dep_flag)
 
     CONSURF_FLAG=""
-    if [[ -d "${CONSURF_DIR}/files" ]] && ls "${CONSURF_DIR}/files/"*.json &>/dev/null; then
+    if [[ -d "${CONSURF_DIR}/files" ]] && find "${CONSURF_DIR}/files" -maxdepth 1 -name "*.json" -print -quit | grep -q .; then
         CONSURF_FLAG="--consurf_dir ${CONSURF_DIR}"
-        N_CONSURF=$(ls "${CONSURF_DIR}/files/"*.json 2>/dev/null | wc -l)
+        N_CONSURF=$(find "${CONSURF_DIR}/files" -maxdepth 1 -name "*.json" | wc -l)
         echo "  ConSurf data found (${N_CONSURF} JSONs in files/)"
-    elif [[ -d "${CONSURF_DIR}" ]] && ls "${CONSURF_DIR}"/*.json &>/dev/null; then
+    elif [[ -d "${CONSURF_DIR}" ]] && find "${CONSURF_DIR}" -maxdepth 1 -name "*.json" -print -quit | grep -q .; then
         CONSURF_FLAG="--consurf_dir ${CONSURF_DIR}"
         echo "  ConSurf data found"
     else
