@@ -114,6 +114,8 @@ def _load_pooled_data(dataset, scorer) -> pd.DataFrame:
                     rows.append({
                         "robustness_z": r_z[i],
                         "target_z": t_z[i],
+                        "robustness_raw": float(r[i]),
+                        "target_raw": float(t[i]),
                         "target_type": tname,
                         "protein_id": pid,
                     })
@@ -419,9 +421,8 @@ def generate_fig3(results: dict, output_dir: Path):
 
         ax_r2.set_ylabel("CV $R^2$")
         ax_r2.set_title(f"{title}: model comparison", fontweight="bold")
-        # Legend only on first row left panel
-        if row_idx == 0:
-            ax_r2.legend(frameon=False)
+        # Legend on every left panel (datasets differ by row)
+        ax_r2.legend(frameon=False)
 
         # ---- Right: 24-feature Ridge coefficients with error bars ----
         ax_coef = axes[row_idx, 1]
@@ -454,7 +455,7 @@ def generate_fig3(results: dict, output_dir: Path):
 
             offset = (series_idx - (n_series - 1) / 2) * width
             ax_coef.bar(x_coef + offset, vals, width, yerr=errs,
-                        color=color, alpha=0.8, capsize=1, label=label)
+                        color=color, alpha=0.8, capsize=2, label=label)
 
         ax_coef.set_xticks(x_coef)
         ax_coef.set_xticklabels(ALL_LABELS, rotation=45, ha="right")
@@ -481,6 +482,84 @@ def generate_fig4(results: dict, output_dir: Path):
     print("  (fig4 merged into fig3, skipping)")
 
 
+def generate_supp_fig1(results: dict, output_dir: Path):
+    """Raw (un-normalized) scatter of robustness vs dynamics, motivating z-scoring."""
+    TARGET_UNITS = {
+        "rmsf": r"RMSF ($\AA$)",
+        "bfactor": r"B-factor ($\AA^2$)",
+    }
+
+    n_panels = len(FIG2_PANELS)
+    n_cols = 2
+    n_rows = (n_panels + n_cols - 1) // n_cols
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(10 * n_cols, 8 * n_rows))
+    axes = np.atleast_2d(axes)
+
+    for panel_idx, (ds_name, target) in enumerate(FIG2_PANELS):
+        ds = DATASETS[ds_name]
+        if target == "rmsf":
+            target_label = "RMSF"
+        elif ds_name == "rci_s2":
+            target_label = r"$1{-}S^2_\mathrm{RCI}$"
+        else:
+            target_label = "B-factor"
+
+        row, col = panel_idx // n_cols, panel_idx % n_cols
+        ax = axes[row, col]
+
+        pooled = _load_pooled_data(ds_name, "thermompnn")
+        if pooled.empty:
+            ax.set_title(f"{ds.display_name} {target_label}\n(no data)")
+            continue
+
+        target_data = pooled[pooled["target_type"] == target]
+        if target_data.empty:
+            ax.set_title(f"{ds.display_name} {target_label}\n(no data)")
+            continue
+
+        # Subsample for plotting
+        n_max = 50000
+        if len(target_data) > n_max:
+            target_data = target_data.sample(n_max, random_state=42)
+
+        x = target_data["robustness_raw"].values
+        y = target_data["target_raw"].values
+
+        # Color by protein to show between-protein dominance
+        pids = target_data["protein_id"].values
+        unique_pids = np.unique(pids)
+        pid_colors = {p: i for i, p in enumerate(unique_pids)}
+        c = np.array([pid_colors[p] for p in pids])
+
+        ax.scatter(x, y, alpha=0.05, s=2, c=c, cmap="tab20", rasterized=True)
+
+        rho = scipy_stats.spearmanr(x, y)[0]
+        r_pearson = np.corrcoef(x, y)[0, 1]
+        n_proteins = len(unique_pids)
+
+        ax.set_title(f"{ds.display_name} {target_label}\n"
+                     f"Spearman $\\rho = {rho:.3f}$, Pearson $r = {r_pearson:.3f}$, "
+                     f"$n = {len(x):,}$ residues, {n_proteins} proteins",
+                     fontsize=11)
+        ax.set_xlabel(r"$\operatorname{std}(\Delta\Delta G)$ (kcal/mol)")
+        if ds_name == "rci_s2":
+            ax.set_ylabel(r"$1 - S^2_\mathrm{RCI}$ (unitless)")
+        else:
+            ax.set_ylabel(TARGET_UNITS.get(target, target_label))
+
+    # Remove empty axes
+    for idx in range(n_panels, n_rows * n_cols):
+        row, col = idx // n_cols, idx % n_cols
+        axes[row, col].set_visible(False)
+
+    plt.tight_layout()
+    for ext in ["pdf", "png"]:
+        fig.savefig(output_dir / f"supp_fig1_raw_scatter.{ext}",
+                    dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print("  Generated supp_fig1_raw_scatter")
+
+
 # ============================================================================
 # MAIN
 # ============================================================================
@@ -490,6 +569,7 @@ FIGURE_GENERATORS = {
     "fig2": ("Fig 2 (density scatter)", generate_fig2),
     "fig3": ("Fig 3 (model comparison)", generate_fig3),
     "fig4": ("Fig 4 (DDG coefficients)", generate_fig4),
+    "supp_fig1": ("Supp Fig 1 (raw scatter)", generate_supp_fig1),
 }
 
 

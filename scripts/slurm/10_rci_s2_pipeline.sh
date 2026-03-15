@@ -23,7 +23,7 @@ OUTPUT_DIR=$PROJECT_DIR/data/rci_s2_processed
 RCI_ROBUSTNESS_DIR=$PROJECT_DIR/data/rci_s2_robustness
 RCI_ANALYSIS_DIR=$PROJECT_DIR/data/rci_s2_analysis
 
-STEP=${1:?Usage: bash scripts/slurm/10_rci_s2_pipeline.sh [preprocess|thermompnn|all_analysis|collect]}
+STEP=${1:?Usage: bash scripts/slurm/10_rci_s2_pipeline.sh [preprocess|thermompnn|esm1v|all_analysis|collect]}
 
 mkdir -p $LOG_DIR
 
@@ -125,6 +125,70 @@ EOF
 fi
 
 # ============================================================
+# Step 2b: Compute ESM-1v robustness (GPU array job)
+# ============================================================
+if [[ "$STEP" == "esm1v" ]]; then
+    echo "=== Step 2b: Submit ESM-1v SLURM job ==="
+
+    PDB_LIST=$OUTPUT_DIR/pdb_list.txt
+    if [[ ! -f "$PDB_LIST" ]]; then
+        find $OUTPUT_DIR/proteins -name "*.pdb" -type l | sort > $PDB_LIST
+    fi
+    N_PDBS=$(wc -l < $PDB_LIST)
+    echo "  Found $N_PDBS PDB files"
+
+    BATCH_SIZE=$CHUNK_SIZE
+    N_BATCHES=$(( (N_PDBS + BATCH_SIZE - 1) / BATCH_SIZE ))
+    MAX_IDX=$(( N_BATCHES - 1 ))
+
+    cat > $LOG_DIR/rci_esm1v.slurm << EOF
+#!/bin/bash
+#SBATCH --job-name=rci_esm1v
+#SBATCH --output=$LOG_DIR/rci_esm1v_%a_%j.out
+#SBATCH --error=$LOG_DIR/rci_esm1v_%a_%j.err
+#SBATCH --time=08:00:00
+#SBATCH --mem=16G
+#SBATCH --cpus-per-task=2
+#SBATCH --partition=$GPU_PARTITION
+#SBATCH --gres=$GPU_GRES
+#SBATCH --array=0-${MAX_IDX}
+
+source $VENV_DIR/bin/activate
+cd $REPO_DIR
+
+BATCH_SIZE=$BATCH_SIZE
+START=\$(( SLURM_ARRAY_TASK_ID * BATCH_SIZE + 1 ))
+END=\$(( START + BATCH_SIZE - 1 ))
+
+BATCH_FILE=/tmp/rci_esm1v_batch_\${SLURM_JOB_ID}_\${SLURM_ARRAY_TASK_ID}.txt
+sed -n "\${START},\${END}p" $PDB_LIST > \$BATCH_FILE
+
+N=\$(wc -l < \$BATCH_FILE)
+if [ "\$N" -eq 0 ]; then
+    echo "No PDBs in batch \$SLURM_ARRAY_TASK_ID, exiting."
+    exit 0
+fi
+
+echo "=== ESM-1v Batch \$SLURM_ARRAY_TASK_ID: \$N PDBs (lines \$START to \$END) ==="
+echo "Started: \$(date)"
+
+python scripts/compute_robustness.py \\
+    --scorer esm1v \\
+    --pdb_list \$BATCH_FILE \\
+    --output_dir $RCI_ROBUSTNESS_DIR \\
+    --device cuda \\
+    --skip_existing
+
+echo "Finished: \$(date)"
+EOF
+
+    echo "  Submitting $N_BATCHES array jobs (partition=$GPU_PARTITION)..."
+    sbatch $LOG_DIR/rci_esm1v.slurm
+    echo "  Monitor: squeue -u \$USER | grep rci_esm1v"
+    echo "  Progress: ls $RCI_ROBUSTNESS_DIR/esm1v/ 2>/dev/null | wc -l"
+fi
+
+# ============================================================
 # Step 3+4: Correlation + Multi-DDG (CPU sbatch)
 # ============================================================
 if [[ "$STEP" == "all_analysis" ]]; then
@@ -156,7 +220,41 @@ echo "Finished: \$(date)"
 EOF
 
     sbatch $LOG_DIR/rci_correlate.slurm
-    echo "Submitted correlation job"
+    echo "Submitted ThermoMPNN correlation job"
+
+    # ESM-1v correlation (if robustness files exist)
+    if [[ -d "$RCI_ROBUSTNESS_DIR/esm1v" ]]; then
+        cat > $LOG_DIR/rci_correlate_esm.slurm << EOF
+#!/bin/bash
+#SBATCH --job-name=rci_corr_esm
+#SBATCH --output=$LOG_DIR/rci_corr_esm_%j.out
+#SBATCH --error=$LOG_DIR/rci_corr_esm_%j.err
+#SBATCH --time=02:00:00
+#SBATCH --mem=16G
+#SBATCH --cpus-per-task=4
+#SBATCH --partition=$CPU_PARTITION
+
+source $VENV_DIR/bin/activate
+cd $REPO_DIR
+
+echo "=== RCI-S2 ESM-1v Correlation Analysis ==="
+echo "Started: \$(date)"
+
+python scripts/correlate_robustness_dynamics.py \\
+    --atlas_dir $OUTPUT_DIR \\
+    --robustness_dir $RCI_ROBUSTNESS_DIR \\
+    --scorer esm1v \\
+    --output_dir $RCI_ANALYSIS_DIR \\
+    --target bfactor
+
+echo "Finished: \$(date)"
+EOF
+
+        sbatch $LOG_DIR/rci_correlate_esm.slurm
+        echo "Submitted ESM-1v correlation job"
+    else
+        echo "WARNING: No ESM-1v robustness dir found. Run 'esm1v' step first."
+    fi
 
     # Multi-DDG
     cat > $LOG_DIR/rci_multi_ddg.slurm << EOF
