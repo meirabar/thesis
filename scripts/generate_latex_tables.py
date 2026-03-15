@@ -588,13 +588,15 @@ def generate_table_s1(results: dict) -> str:
 
     # --- Delta R² (ThermoMPNN over baselines) ---
     lines.append(r"\multicolumn{" + str(n_cols + 1) + r"}{l}{\textit{$\Delta R^2$ (adding ThermoMPNN to baseline)}} \\")
-    for baseline, label in [("plddt", r"$+$ pLDDT"), ("sasa", r"$+$ SASA"),
-                             ("conservation", r"$+$ Conservation")]:
+    for baseline, field_name, label in [
+        ("plddt", "delta_r2_over_plddt", r"$+$ pLDDT"),
+        ("sasa", "delta_r2_over_sasa", r"$+$ SASA"),
+        ("conservation", "pooled_delta_r2_over_conservation", r"$+$ Conservation"),
+    ]:
         row = [r"\quad " + label]
         for ds_name, target in TABLE1_COLUMNS:
             run = _get_run(results, ds_name, "thermompnn", target)
-            field = f"delta_r2_over_{baseline}"
-            val = _get_corr(run, field)
+            val = _get_corr(run, field_name)
             row.append(_signed(val) if val is not None else "---")
         lines.append(" & ".join(row) + r" \\")
     lines.append(r"\midrule")
