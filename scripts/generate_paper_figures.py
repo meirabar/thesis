@@ -560,6 +560,168 @@ def generate_supp_fig1(results: dict, output_dir: Path):
     print("  Generated supp_fig1_raw_scatter")
 
 
+def generate_supp_fig2(results: dict, output_dir: Path):
+    """When does robustness beat pLDDT? + Stratify by protein flexibility."""
+
+    # -- Panel A: characterize proteins where |rho_rob| > |rho_plddt| --
+    # -- Panel B: rho vs mean target (protein flexibility) --
+
+    panels = []
+    for ds_name, target in FIG2_PANELS:
+        ds = DATASETS[ds_name]
+        pp = _load_per_protein_tsv(ds_name, "thermompnn", target)
+        if pp.empty:
+            continue
+
+        # Determine rho column names
+        if target == "rmsf":
+            rho_rob_col = "rho_std_ddg_rmsf"
+            rho_plddt_col = "rho_plddt_rmsf"
+        else:
+            rho_rob_col = "rho_robustness_bfactor_target"
+            if rho_rob_col not in pp.columns:
+                rho_rob_col = "rho_std_ddg_bfactor"
+            rho_plddt_col = "rho_plddt_bfactor"
+
+        if rho_rob_col not in pp.columns or rho_plddt_col not in pp.columns:
+            continue
+
+        if target == "rmsf":
+            target_label = "RMSF"
+        elif ds_name == "rci_s2":
+            target_label = r"$1{-}S^2_\mathrm{RCI}$"
+        else:
+            target_label = "B-factor"
+
+        # Compute mean target per protein from raw per-residue data
+        pooled = _load_pooled_data(ds_name, "thermompnn")
+        if pooled.empty:
+            continue
+        target_data = pooled[pooled["target_type"] == target]
+        if target_data.empty:
+            continue
+        mean_target = target_data.groupby("protein_id")["target_raw"].mean()
+
+        panels.append({
+            "ds_name": ds_name, "target": target,
+            "ds": ds, "target_label": target_label,
+            "pp": pp, "rho_rob_col": rho_rob_col,
+            "rho_plddt_col": rho_plddt_col,
+            "mean_target": mean_target,
+        })
+
+    if not panels:
+        print("  No data for supp_fig2")
+        return
+
+    n = len(panels)
+    fig, axes = plt.subplots(n, 2, figsize=(14, 4.5 * n), squeeze=False)
+
+    for i, p in enumerate(panels):
+        pp = p["pp"]
+        rho_rob = pp[p["rho_rob_col"]].values
+        rho_plddt = pp[p["rho_plddt_col"]].values
+        valid = np.isfinite(rho_rob) & np.isfinite(rho_plddt)
+        rho_rob = rho_rob[valid]
+        rho_plddt = rho_plddt[valid]
+        pids = pp["protein_id"].values[valid]
+        n_res = pp["n_residues_used"].values[valid]
+
+        rob_wins = np.abs(rho_rob) > np.abs(rho_plddt)
+
+        # --- Panel A: What characterizes proteins where robustness wins? ---
+        ax_a = axes[i, 0]
+
+        ax_a.scatter(n_res[~rob_wins], np.abs(rho_rob[~rob_wins]),
+                     alpha=0.3, s=15, c="tab:blue", label="pLDDT wins")
+        ax_a.scatter(n_res[rob_wins], np.abs(rho_rob[rob_wins]),
+                     alpha=0.5, s=25, c="tab:red", marker="^",
+                     label="Robustness wins")
+
+        frac = rob_wins.sum() / len(rob_wins) * 100
+        # Median size comparison
+        med_win = np.median(n_res[rob_wins]) if rob_wins.sum() > 0 else 0
+        med_lose = np.median(n_res[~rob_wins]) if (~rob_wins).sum() > 0 else 0
+
+        ax_a.set_xlabel("Protein length (residues)")
+        ax_a.set_ylabel(r"Per-protein $|\rho|$ (robustness, target)")
+        ax_a.set_title(
+            f"{p['ds'].display_name} {p['target_label']}\n"
+            f"Robustness wins: {frac:.0f}% "
+            f"(med. length {med_win:.0f} vs {med_lose:.0f})",
+            fontsize=13)
+        ax_a.legend(fontsize=11)
+
+        # --- Panel B: rho vs mean target (protein flexibility) ---
+        ax_b = axes[i, 1]
+
+        # Match per-protein rho to mean target
+        mean_tgt_vals = []
+        rho_vals = []
+        plddt_vals = []
+        for j, pid in enumerate(pids):
+            if pid in p["mean_target"].index:
+                mean_tgt_vals.append(p["mean_target"][pid])
+                rho_vals.append(rho_rob[j])
+                plddt_vals.append(rho_plddt[j])
+        mean_tgt_vals = np.array(mean_tgt_vals)
+        rho_vals = np.array(rho_vals)
+        plddt_vals = np.array(plddt_vals)
+
+        if len(mean_tgt_vals) > 5:
+            # Bin by flexibility terciles
+            t1, t2 = np.percentile(mean_tgt_vals, [33, 67])
+            rigid = mean_tgt_vals <= t1
+            medium = (mean_tgt_vals > t1) & (mean_tgt_vals <= t2)
+            flexible = mean_tgt_vals > t2
+
+            categories = [
+                ("Rigid", rigid, "tab:blue"),
+                ("Medium", medium, "tab:gray"),
+                ("Flexible", flexible, "tab:red"),
+            ]
+
+            positions = np.arange(len(categories))
+            bar_w = 0.35
+            rob_medians = []
+            plddt_medians = []
+            for label, mask, color in categories:
+                rob_medians.append(np.median(np.abs(rho_vals[mask])))
+                plddt_medians.append(np.median(np.abs(plddt_vals[mask])))
+
+            ax_b.bar(positions - bar_w / 2, rob_medians, bar_w,
+                     color="tab:blue", alpha=0.8, label="Robustness")
+            ax_b.bar(positions + bar_w / 2, plddt_medians, bar_w,
+                     color="tab:orange", alpha=0.8, label="pLDDT")
+
+            cat_labels = []
+            for label, mask, _ in categories:
+                cat_labels.append(f"{label}\n(n={mask.sum()})")
+            ax_b.set_xticks(positions)
+            ax_b.set_xticklabels(cat_labels)
+            ax_b.set_ylabel(r"Median per-protein $|\rho|$")
+            ax_b.set_title(
+                f"{p['ds'].display_name} {p['target_label']}\n"
+                f"by protein flexibility tercile",
+                fontsize=13)
+            ax_b.legend(fontsize=11)
+
+            # Add text with gap
+            for k, (rob_m, plddt_m) in enumerate(zip(rob_medians,
+                                                      plddt_medians)):
+                gap = plddt_m - rob_m
+                y_pos = max(rob_m, plddt_m) + 0.02
+                ax_b.text(k, y_pos, f"gap={gap:.2f}",
+                          ha="center", fontsize=9, color="gray")
+
+    plt.tight_layout()
+    for ext in ["pdf", "png"]:
+        fig.savefig(output_dir / f"supp_fig2_robustness_vs_plddt.{ext}",
+                    dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print("  Generated supp_fig2_robustness_vs_plddt")
+
+
 # ============================================================================
 # MAIN
 # ============================================================================
@@ -570,6 +732,8 @@ FIGURE_GENERATORS = {
     "fig3": ("Fig 3 (model comparison)", generate_fig3),
     "fig4": ("Fig 4 (DDG coefficients)", generate_fig4),
     "supp_fig1": ("Supp Fig 1 (raw scatter)", generate_supp_fig1),
+    "supp_fig2": ("Supp Fig 2 (robustness vs pLDDT characterization)",
+                  generate_supp_fig2),
 }
 
 
