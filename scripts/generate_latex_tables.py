@@ -170,7 +170,7 @@ def generate_table1(results: dict) -> str:
     lines.append(r"\label{tab:pooled}")
     lines.append(r"\small")
     n_cols = len(TABLE1_COLUMNS)
-    col_spec = "c" * n_cols
+    col_spec = "r" * n_cols
     lines.append(r"\begin{tabular}{@{}l " + col_spec + r"@{}}")
     lines.append(r"\toprule")
 
@@ -331,7 +331,7 @@ def generate_table2(results: dict) -> str:
     lines.append(r"\label{tab:stratified}")
     lines.append(r"\small")
     n_cols = len(TABLE1_COLUMNS)
-    col_spec = "c" * n_cols
+    col_spec = "r" * n_cols
     lines.append(r"\begin{tabular}{@{}l " + col_spec + r"@{}}")
     lines.append(r"\toprule")
 
@@ -413,8 +413,8 @@ def generate_table3(results: dict) -> str:
     lines.append(r"\centering")
     lines.append(r"\caption{Comparison of robustness summary statistics and")
     lines.append(r"multi-$\Delta\Delta G$ regression models (ThermoMPNN scorer).")
-    lines.append(r"\emph{Top panel}: median per-protein $|\rho|$ for scalar")
-    lines.append(r"robustness summaries; higher is better.")
+    lines.append(r"\emph{Top panel}: median per-protein Spearman $\rho$ for scalar")
+    lines.append(r"robustness summaries.")
     lines.append(r"\emph{Bottom panel}: 5-fold protein-level cross-validated $R^2$")
     lines.append(r"for regression models predicting dynamics from $\Delta\Delta G$")
     lines.append(r"features; proteins are held out as entire units so the model")
@@ -424,7 +424,7 @@ def generate_table3(results: dict) -> str:
     lines.append(r"\label{tab:alt_and_multi}")
     lines.append(r"\small")
     n_cols = len(TABLE1_COLUMNS)
-    col_spec = "c" * n_cols
+    col_spec = "r" * n_cols
     lines.append(r"\begin{tabular}{@{}l r " + col_spec + r"@{}}")
     lines.append(r"\toprule")
 
@@ -444,9 +444,9 @@ def generate_table3(results: dict) -> str:
     lines.append(" & ".join(h2) + r" \\")
     lines.append(r"\midrule")
 
-    # --- Top half: scalar robustness summaries (median per-protein |rho|) ---
+    # --- Top half: scalar robustness summaries (median per-protein rho) ---
     multicolspan = n_cols + 2
-    lines.append(r"\multicolumn{" + str(multicolspan) + r"}{l}{\textit{Scalar robustness summaries (med.\ per-protein $|\rho|$)}} \\")
+    lines.append(r"\multicolumn{" + str(multicolspan) + r"}{l}{\textit{Scalar robustness summaries (med.\ per-protein $\rho$)}} \\")
 
     # Collect all alt robustness values for per-column highlighting
     alt_grid = []  # [measure_idx][col_idx] = (formatted, raw_val)
@@ -457,7 +457,7 @@ def generate_table3(results: dict) -> str:
             alt = run.get("alt_robustness_medians", {})
             val = alt.get(measure_key)
             if val is not None:
-                row_cells.append((f"{abs(val):.3f}", abs(val)))
+                row_cells.append((_neg_sign(val), val))
             else:
                 row_cells.append(("---", None))
         alt_grid.append(row_cells)
@@ -468,16 +468,16 @@ def generate_table3(results: dict) -> str:
         run = _get_run(results, ds_name, "thermompnn", target)
         val = _get_pp(run, "median_rho_plddt")
         if val is not None:
-            plddt_cells.append((f"{abs(val):.3f}", abs(val)))
+            plddt_cells.append((_neg_sign(val), val))
         else:
             plddt_cells.append(("---", None))
     alt_grid.append(plddt_cells)
 
-    # Highlight best per column across all scalar measures + pLDDT
+    # Highlight best |rho| per column across all scalar measures + pLDDT
     for col_idx in range(n_cols):
         col_cells = [(alt_grid[m][col_idx][0], alt_grid[m][col_idx][1])
                       for m in range(len(alt_grid))]
-        highlighted = _highlight_best_in_row(col_cells, higher_is_better=True)
+        highlighted = _highlight_best_in_row(col_cells, higher_is_better=True, use_abs=True)
         for m in range(len(alt_grid)):
             alt_grid[m][col_idx] = (highlighted[m], alt_grid[m][col_idx][1])
 
@@ -589,7 +589,7 @@ def generate_table_s1(results: dict) -> str:
     lines.append(r"\label{tab:supp_partial}")
     lines.append(r"\small")
     n_cols = len(TABLE1_COLUMNS)
-    col_spec = "c" * n_cols
+    col_spec = "r" * n_cols
     lines.append(r"\begin{tabular}{@{}l " + col_spec + r"@{}}")
     lines.append(r"\toprule")
 
