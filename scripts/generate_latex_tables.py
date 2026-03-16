@@ -33,8 +33,17 @@ def _fmt(val, decimals=3, sign=False):
     return f"{val:.{decimals}f}"
 
 
+def _neg_sign(val, decimals=3):
+    """Format with $-$ for negatives, no sign for positives."""
+    if val is None:
+        return "---"
+    if val < 0:
+        return f"$-${abs(val):.{decimals}f}"
+    return f"{val:.{decimals}f}"
+
+
 def _signed(val, decimals=3):
-    """Format with explicit sign ($-$0.xxx or $+$0.xxx)."""
+    """Format with explicit sign ($-$0.xxx or $+$0.xxx). Use only for Delta R^2."""
     if val is None:
         return "---"
     if val < 0:
@@ -201,7 +210,7 @@ def generate_table1(results: dict) -> str:
             else:
                 run = _get_run(results, ds_name, pred, target)
                 val = _get_pp(run, "median_rho_robustness")
-            row_cells.append((_signed(val), val))
+            row_cells.append((_neg_sign(val), val))
         med_rho_grid.append(row_cells)
 
     # Highlight best |rho| per column
@@ -237,7 +246,7 @@ def generate_table1(results: dict) -> str:
             else:
                 run = _get_run(results, ds_name, pred, target)
                 val = _get_corr(run, "pooled_rho_robustness")
-            row_cells.append((_signed(val), val))
+            row_cells.append((_neg_sign(val), val))
         pooled_rho_grid.append(row_cells)
 
     for col_idx in range(n_cols):
@@ -354,9 +363,9 @@ def generate_table2(results: dict) -> str:
             rho_rob = _get_strat(run, "secondary_structure", ss, "rho_robustness")
             rho_plddt = _get_strat(run, "secondary_structure", ss, "rho_plddt")
             if rho_rob is not None:
-                cell = _signed(rho_rob)
+                cell = _neg_sign(rho_rob)
                 if rho_plddt is not None:
-                    cell += r"\,(" + _signed(rho_plddt) + ")"
+                    cell += r"\,(" + _neg_sign(rho_plddt) + ")"
             else:
                 cell = "---"
             row_cells.append((cell, rho_rob))
@@ -377,9 +386,9 @@ def generate_table2(results: dict) -> str:
             rho_rob = _get_strat(run, "burial", burial, "rho_robustness")
             rho_plddt = _get_strat(run, "burial", burial, "rho_plddt")
             if rho_rob is not None:
-                cell = _signed(rho_rob)
+                cell = _neg_sign(rho_rob)
                 if rho_plddt is not None:
-                    cell += r"\,(" + _signed(rho_plddt) + ")"
+                    cell += r"\,(" + _neg_sign(rho_plddt) + ")"
             else:
                 cell = "---"
             row_cells.append((cell, rho_rob))
@@ -610,7 +619,7 @@ def generate_table_s1(results: dict) -> str:
             run = _get_run(results, ds_name, "thermompnn", target)
             field = f"pooled_partial_rho_{conf}"
             val = _get_corr(run, field)
-            row.append(_signed(val))
+            row.append(_neg_sign(val))
         lines.append(" & ".join(row) + r" \\")
     lines.append(r"\midrule")
 
@@ -619,7 +628,7 @@ def generate_table_s1(results: dict) -> str:
     for ds_name, target in TABLE1_COLUMNS:
         run = _get_run(results, ds_name, "thermompnn", target)
         val = _get_corr(run, "pooled_rho_robustness_conservation")
-        row_col.append(_signed(val))
+        row_col.append(_neg_sign(val))
     lines.append(" & ".join(row_col) + r" \\")
 
     lines.append(r"\bottomrule")
